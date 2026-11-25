@@ -1,0 +1,12 @@
+gemi
+tests/test_core
+windows/*.exe
+windows/*.dll
+windows/*.pem
+*.zip
+nimcache/
+config
+gemi.cfg
+*.tmp
+.env
+*.key
