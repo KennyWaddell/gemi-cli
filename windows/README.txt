@@ -1,5 +1,5 @@
 ================================================================================
-gemi-cli v1.0.0 (Windows x64 Portable)
+gemi-cli v1.1.0 (Windows x64 Portable)
 Lightweight Gemini CLI for modest hardware (Windows 7 SP1 / 8.1 / 10 / 11)
 ================================================================================
 
@@ -24,20 +24,24 @@ Quick Start
 
 Commands & Options
   gemi "prompt"               Ask Gemini a question
+  gemi -i                     In-memory multi-turn chat (no disk history)
+  gemi -s "rule" "prompt"     Set a fixed system instruction
   gemi -w "prompt"            Enable real-time Google Search grounding
-  gemi -m <model> "prompt"    Use a specific model (default: gemini-3.5-flash-lite)
-  gemi -f <file> "prompt"     Attach text (max 1 MB) or png/jpg/webp/pdf (max 8 MB)
+  gemi -m <model> "prompt"    Use another model (or -m alone to pick from 5)
+  gemi --models               List the 5 recommended lightweight models
+  gemi -f <file> "prompt"     Attach text (<=1 MB), image/PDF (<=8 MB inline,
+                              or >8 MB up to 100 MB & audio/video via File API)
+  gemi --img out.png "prompt" Generate an image (requires *-image quota/billing)
   type file.txt | gemi "ask"  Read text from standard input (max 1 MB)
   systeminfo | gemi "ask"     Analyze your PC hardware via pipe
   gemi --set-key              Set or replace your GEMINI_API_KEY (hidden input)
-  gemi --set-model <model>    Save default model to config
+  gemi --set-model <model>    Save default model to config (or omit to pick)
   gemi --version              Show version and active model
   gemi --credits              Show credits and repository
   gemi --help                 Show full help
 
-  Note: When double-clicking gemi.exe, you can also type --help, --set-key,
-  --set-model <model>, --version, --credits, or press Enter on an empty line
-  to exit.
+  Note: When double-clicking gemi.exe, you can also type --help, --models,
+  --set-key, --set-model, --version, --credits, or exit/quit to close.
 
 Credits & License
   Created by Kenny Waddell
@@ -66,20 +70,24 @@ Inicio rápido
 
 Comandos y opciones
   gemi "pregunta"             Hacer una consulta a Gemini
+  gemi -i                     Chat multi-turno en memoria (sin guardar en disco)
+  gemi -s "regla" "pregunta"  Fijar una instrucción de sistema para el modelo
   gemi -w "pregunta"          Activar búsqueda en tiempo real con Google Search
-  gemi -m <modelo> "pregunta" Usar otro modelo (por defecto: gemini-3.5-flash-lite)
-  gemi -f <archivo> "preg."   Adjuntar texto (máx. 1 MB) o png/jpg/webp/pdf (máx. 8 MB)
+  gemi -m <modelo> "pregunta" Usar otro modelo (o -m solo para elegir entre 5)
+  gemi --models               Mostrar los 5 modelos ligeros recomendados
+  gemi -f <archivo> "preg."   Adjuntar texto (<=1 MB), imagen/PDF (<=8 MB inline,
+                              o >8 MB hasta 100 MB y audio/vídeo vía File API)
+  gemi --img out.png "preg."  Generar imagen (requiere cuota/billing *-image)
   type archivo.txt | gemi "p" Leer entrada desde tubería (máx. 1 MB)
   systeminfo | gemi "preg."   Analizar el hardware de tu PC por tubería
   gemi --set-key              Configurar o reemplazar GEMINI_API_KEY (entrada oculta)
-  gemi --set-model <modelo>   Guardar modelo por defecto en la configuración
+  gemi --set-model <modelo>   Guardar modelo por defecto (o sin nombre para elegir)
   gemi --version              Mostrar versión y modelo activo
   gemi --credits              Mostrar créditos y repositorio
   gemi --help                 Mostrar la ayuda completa
 
   Nota: Al abrir gemi.exe con doble clic también puedes escribir --help,
-  --set-key, --set-model <modelo>, --version, --credits o pulsar Enter en
-  blanco para salir.
+  --models, --set-key, --set-model, --version, --credits o exit/salir.
 
 Créditos y licencia
   Creado por Kenny Waddell

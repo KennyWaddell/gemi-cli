@@ -1,4 +1,4 @@
-import std/[json, osproc, strutils, unittest]
+import std/[base64, json, osproc, strutils, unittest]
 import gemi_core
 
 suite "modeloValido y claveValida":
@@ -93,9 +93,14 @@ suite "adjuntos y serialización":
     check mimeBinario("x.jpeg") == "image/jpeg"
     check mimeBinario("x.pdf") == "application/pdf"
     check mimeBinario("x.c") == ""
+    check mimeMultimedia("audio.MP3") == "audio/mpeg"
+    check mimeMultimedia("video.webm") == "video/webm"
   test "firma coincide con el tipo":
     check firmaValida("image/png", "\x89PNG\r\n\x1a\nresto")
     check firmaValida("image/webp", "RIFF1234WEBPdatos")
+    check firmaValida("audio/mpeg", "ID3\x03\x00datos")
+    check firmaValida("video/mp4", "\x00\x00\x00\x18ftypmp42")
+    check firmaValida("video/webm", "\x1A\x45\xDF\xA3datos")
     check not firmaValida("image/pdf_mal", "%PDF-1.4")
     check firmaValida("application/pdf", "%PDF-1.4")
     check not firmaValida("image/png", "texto plano")
@@ -116,6 +121,32 @@ suite "adjuntos y serialización":
     let cuerpoWeb = armarCuerpo([p1], busquedaWeb = true)
     let jw = parseJson(cuerpoWeb)
     check jw["tools"][0].hasKey("google_search")
+    let chat = armarCuerpoChat([
+      ("user", @[parteTexto("hola")]),
+      ("model", @[parteTexto("qué tal")]),
+      ("user", @[parteTexto("bien")])
+    ], sistema = "Responde corto")
+    let jc = parseJson(chat)
+    check jc["systemInstruction"]["parts"][0]["text"].getStr() == "Responde corto"
+    check jc["contents"].len == 3
+    check jc["contents"][0]["role"].getStr() == "user"
+    check jc["contents"][1]["role"].getStr() == "model"
+    check jc["contents"][2]["parts"][0]["text"].getStr() == "bien"
+    let pUri = parteArchivoUri("video/mp4", "https://generativelanguage.googleapis.com/v1beta/files/abc")
+    let ju = parseJson(pUri)
+    check ju["fileData"]["mimeType"].getStr() == "video/mp4"
+    let info = extraerInfoArchivo("""{"file":{"uri":"https://x/files/1","name":"files/1","state":"ACTIVE"}}""")
+    check info.uri == "https://x/files/1" and info.nombre == "files/1" and info.estado == "ACTIVE"
+    let cuerpoImg = armarCuerpo([p1], generarImagen = true)
+    let ji = parseJson(cuerpoImg)
+    check ji["generationConfig"]["responseModalities"][1].getStr() == "IMAGE"
+    let pngFake = "\x89PNG\r\n\x1a\n1234"
+    let respImg = """{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"""" &
+      encode(pngFake) & """"}}]}}]}"""
+    let img = extraerImagen(respImg)
+    check img.mime == "image/png" and img.datos == pngFake
+    let respBadImg = """{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"bm9wb25n"}}]}}]}"""
+    check extraerImagen(respBadImg).datos == ""
 
 suite "leerHastaLimite en pipe real":
   test "lee más de 64 KB completos desde un pipe":

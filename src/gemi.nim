@@ -1,22 +1,37 @@
-import std/[httpclient, net, os, parseopt, strutils, terminal]
+import std/[httpclient, json, net, os, parseopt, strutils, terminal]
 import gemi_core
 when defined(windows):
   import std/base64
 
 const
-  versionApp = "1.0.0"
+  versionApp = "1.1.0"
   modeloPorDefecto = "gemini-3.5-flash-lite"
+  modeloImagenPorDefecto = "gemini-3.1-flash-image"
+  modelosRecomendados = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.8-flash",
+    "gemma-4-31b-it",
+    "gemma-4-26b-a4b-it"
+  ]
   urlBase = "https://generativelanguage.googleapis.com/v1beta/models/"
+  urlFiles = "https://generativelanguage.googleapis.com/v1beta/"
+  urlUpload = "https://generativelanguage.googleapis.com/upload/v1beta/files"
+  tamBloqueUpload = 1_048_576
   maxIntentos = 3
-  usoEs = """Uso: gemi [-w] [-m modelo] [-f archivo] [--] "pregunta"
+  usoEs = """Uso: gemi [-w] [-i] [-s regla] [-m modelo] [-f archivo] [--] "pregunta"
      cat archivo | gemi "pregunta"
 
+  -i, --interactive  chat multi-turno en memoria (sin guardar en disco)
+  -s, --system       instrucción de sistema fija para el modelo
   -w, --web          activa búsqueda en tiempo real con Google Search
-  -m, --model        modelo a usar (por defecto """ & modeloPorDefecto & """)
-  -f, --file         adjunta un archivo; se puede repetir. Texto (máx. 1 MB) o
-                     png, jpg, webp, pdf (máx. 8 MB). Total máx. 16 MB
+  -m, --model        modelo a usar (sin valor abre selector; defecto """ & modeloPorDefecto & """)
+      --models       muestra los 5 modelos ligeros recomendados
+  -f, --file         adjunta archivo (se puede repetir). Texto (<=1 MB), imagen/PDF
+                     (<=8 MB inline, o >8 MB hasta 100 MB y audio/vídeo vía File API)
+      --img          genera una imagen y la guarda en el archivo indicado
       --set-key      configura o reemplaza tu GEMINI_API_KEY de forma oculta
-      --set-model    guarda el modelo por defecto en tu archivo de config
+      --set-model    guarda el modelo por defecto (sin valor abre selector)
   -v, --version      muestra la versión y modelo activo
   -c, --credits      muestra los créditos y el repositorio
   -h, --help         muestra esta ayuda
@@ -24,15 +39,19 @@ const
 Clave (orden de prioridad):
   1. Variable de entorno GEMINI_API_KEY
   2. Usuario: ~/.config/gemi-cli/config (Linux) o %APPDATA%\gemi-cli\config (Windows, DPAPI)"""
-  usoEn = """Usage: gemi [-w] [-m model] [-f file] [--] "prompt"
+  usoEn = """Usage: gemi [-w] [-i] [-s rule] [-m model] [-f file] [--] "prompt"
        cat file | gemi "prompt"
 
+  -i, --interactive  in-memory multi-turn chat (no disk history)
+  -s, --system       system instruction for the model
   -w, --web          enable real-time Google Search grounding
-  -m, --model        model to use (default: """ & modeloPorDefecto & """)
-  -f, --file         attach a file; repeatable. Text (max 1 MB) or
-                     png, jpg, webp, pdf (max 8 MB). Total max 16 MB
+  -m, --model        model to use (no value opens selector; default: """ & modeloPorDefecto & """)
+      --models       show the 5 recommended lightweight models
+  -f, --file         attach a file; repeatable. Text (<=1 MB), image/PDF (<=8 MB
+                     inline, or >8 MB up to 100 MB & audio/video via File API)
+      --img          generate an image and save it to the given file path
       --set-key      set or update your GEMINI_API_KEY with hidden input
-      --set-model    save the default model in your config file
+      --set-model    save default model in config (no value opens selector)
   -v, --version      show version and active model
   -c, --credits      show credits and repository
   -h, --help         show this help
@@ -125,6 +144,7 @@ when defined(windows):
 else:
   proc escribirConsola(f: File, s: string) = f.write s
   proc escribirLinea(f: File, s: string) = f.writeLine s
+  proc leerLineaConsola(): string = stdin.readLine()
 
 let enEs = detectarEspanol(
   getEnv("LC_ALL"),
@@ -309,40 +329,6 @@ proc leerStdin(): string =
       "stdin input is binary; use -f for images and PDFs"))
   datos
 
-proc cargarArchivo(ruta: string, total: var int): string =
-  if not fileExists(ruta):
-    fallar(tr("no existe el archivo ", "file not found: ") & ruta)
-  let mime = mimeBinario(ruta)
-  let limite = if mime.len > 0: maxBinario else: maxTexto
-  var tam: BiggestInt
-  try:
-    tam = getFileSize(ruta)
-  except OSError as e:
-    fallar(tr("no se puede inspeccionar ", "cannot inspect ") & ruta & ": " & e.msg)
-  if tam == 0:
-    fallar(tr("el archivo está vacío: ", "file is empty: ") & ruta)
-  if tam > limite:
-    fallar(ruta & tr(" supera ", " exceeds ") & $limite & " bytes")
-  var datos: string
-  try:
-    datos = readFile(ruta)
-  except IOError, OSError:
-    fallar(tr("no se puede leer el archivo ", "cannot read file ") & ruta)
-  total += datos.len
-  if total > maxTotal:
-    fallar(tr(
-      "los adjuntos superan el total permitido (",
-      "attachments exceed total allowed size (") & $maxTotal & " bytes)")
-  if mime.len > 0:
-    if not firmaValida(mime, datos):
-      fallar(ruta & tr(" no parece un archivo ", " does not match signature for ") & mime)
-    return parteBinaria(mime, datos)
-  if not esTexto(datos):
-    fallar(ruta & tr(
-      " es binario y su tipo no está soportado (png, jpg, webp, pdf)",
-      " is binary and its format is not supported (png, jpg, webp, pdf)"))
-  parteTexto(tr("Archivo ", "File ") & extractFilename(ruta) & ":\n" & datos)
-
 proc crearContextoSsl(): SslContext =
   when defined(windows):
     let ca = getAppDir() / "cacert.pem"
@@ -357,7 +343,182 @@ proc crearContextoSsl(): SslContext =
   else:
     newContext(verifyMode = CVerifyPeer)
 
-proc enviar(clave, modelo, cuerpo: string): string =
+proc subirArchivoResumable(ruta, mime, claveApi: string, tam: BiggestInt,
+                           remotos: var seq[string]): string =
+  let ctx = crearContextoSsl()
+  defer: destroyContext(ctx)
+  let cliente = newHttpClient(timeout = 60_000, maxRedirects = 0, sslContext = ctx)
+  defer: cliente.close()
+
+  let nombre = extractFilename(ruta)
+  var meta = """{"file":{"displayName":"""
+  escapeJson(nombre, meta)
+  meta.add "}}"
+  cliente.headers = newHttpHeaders({
+    "x-goog-api-key": claveApi,
+    "X-Goog-Upload-Protocol": "resumable",
+    "X-Goog-Upload-Command": "start",
+    "X-Goog-Upload-Header-Content-Length": $tam,
+    "X-Goog-Upload-Header-Content-Type": mime,
+    "Content-Type": "application/json"
+  })
+  estado(tr("Iniciando subida de ", "Starting upload of ") & nombre & "...")
+  let inicio = cliente.post(urlUpload, meta)
+  if int(inicio.code) notin 200 .. 299:
+    fallar("File API start HTTP " & $int(inicio.code) & ": " & mensajeError(inicio.body))
+  let uploadUrl = inicio.headers.getOrDefault("x-goog-upload-url").strip()
+  if not uploadUrl.startsWith("https://generativelanguage.googleapis.com/"):
+    fallar(tr("URL de subida inválida en File API", "Invalid File API upload URL"))
+
+  var f: File
+  if not open(f, ruta, fmRead):
+    fallar(tr("no se puede abrir ", "cannot open ") & ruta)
+  defer: f.close()
+
+  var buf = newString(tamBloqueUpload)
+  var offset: BiggestInt = 0
+  var respCuerpo = ""
+  while offset < tam:
+    let n = f.readBuffer(addr buf[0], tamBloqueUpload)
+    if n <= 0:
+      break
+    let ultimo = (offset + BiggestInt(n)) >= tam
+    let cmd = if ultimo: "upload, finalize" else: "upload"
+    let pct = int(((offset + BiggestInt(n)) * 100) div max(1'i64, tam))
+    estado(tr("Subiendo ", "Uploading ") & nombre & " (" & $pct & "%)...")
+    cliente.headers = newHttpHeaders({
+      "X-Goog-Upload-Offset": $offset,
+      "X-Goog-Upload-Command": cmd
+    })
+    let chunk = if n == tamBloqueUpload: buf else: buf[0 ..< n]
+    let r = cliente.post(uploadUrl, chunk)
+    if int(r.code) notin 200 .. 299:
+      fallar("File API upload HTTP " & $int(r.code) & ": " & mensajeError(r.body))
+    offset += BiggestInt(n)
+    if ultimo:
+      respCuerpo = r.body
+
+  let info = extraerInfoArchivo(respCuerpo)
+  if info.uri.len == 0 or info.nombre.len == 0:
+    fallar(tr("File API no devolvió URI de archivo", "File API did not return file URI"))
+  remotos.add info.nombre
+
+  var st = info.estado
+  var esperas = 0
+  while st == "PROCESSING" and esperas < 30:
+    estado(tr("Procesando archivo en Gemini...", "Processing file on Gemini..."))
+    sleep(2000)
+    inc esperas
+    cliente.headers = newHttpHeaders({"x-goog-api-key": claveApi})
+    let rg = cliente.get(urlFiles & info.nombre)
+    if int(rg.code) in 200 .. 299:
+      st = extraerInfoArchivo(rg.body).estado
+  if st == "FAILED":
+    fallar(tr("Gemini no pudo procesar el archivo ", "Gemini failed to process file ") & nombre)
+  estado("")
+  parteArchivoUri(mime, info.uri)
+
+proc borrarArchivosRemotos(claveApi: string, remotos: seq[string]) =
+  if remotos.len == 0:
+    return
+  try:
+    let ctx = crearContextoSsl()
+    defer: destroyContext(ctx)
+    let cliente = newHttpClient(timeout = 10_000, maxRedirects = 0, sslContext = ctx)
+    defer: cliente.close()
+    cliente.headers = newHttpHeaders({"x-goog-api-key": claveApi})
+    for nom in remotos:
+      if nom.startsWith("files/"):
+        discard cliente.request(urlFiles & nom, httpMethod = HttpDelete)
+  except CatchableError:
+    discard
+
+proc cargarArchivo(ruta, claveApi: string, total: var int, remotos: var seq[string]): string =
+  if not fileExists(ruta):
+    fallar(tr("no existe el archivo ", "file not found: ") & ruta)
+  let mimeBin = mimeBinario(ruta)
+  let mimeMed = mimeMultimedia(ruta)
+  let mime = if mimeMed.len > 0: mimeMed else: mimeBin
+  var tam: BiggestInt
+  try:
+    tam = getFileSize(ruta)
+  except OSError as e:
+    fallar(tr("no se puede inspeccionar ", "cannot inspect ") & ruta & ": " & e.msg)
+  if tam == 0:
+    fallar(tr("el archivo está vacío: ", "file is empty: ") & ruta)
+
+  let usarFileApi = mimeMed.len > 0 or (mimeBin.len > 0 and tam > maxBinario)
+  if usarFileApi:
+    if tam > maxFileApi:
+      fallar(ruta & tr(" supera el límite de ", " exceeds limit of ") & $maxFileApi & " bytes")
+    var f: File
+    if not open(f, ruta, fmRead):
+      fallar(tr("no se puede leer el archivo ", "cannot read file ") & ruta)
+    var cab = newString(32)
+    let leidos = f.readBuffer(addr cab[0], 32)
+    f.close()
+    cab.setLen(leidos)
+    if not firmaValida(mime, cab):
+      fallar(ruta & tr(" no parece un archivo ", " does not match signature for ") & mime)
+    return subirArchivoResumable(ruta, mime, claveApi, tam, remotos)
+
+  let limite = if mimeBin.len > 0: maxBinario else: maxTexto
+  if tam > limite:
+    fallar(ruta & tr(" supera ", " exceeds ") & $limite & " bytes")
+  var datos: string
+  try:
+    datos = readFile(ruta)
+  except IOError, OSError:
+    fallar(tr("no se puede leer el archivo ", "cannot read file ") & ruta)
+  total += datos.len
+  if total > maxTotal:
+    fallar(tr(
+      "los adjuntos superan el total permitido (",
+      "attachments exceed total allowed size (") & $maxTotal & " bytes)")
+  if mimeBin.len > 0:
+    if not firmaValida(mimeBin, datos):
+      fallar(ruta & tr(" no parece un archivo ", " does not match signature for ") & mimeBin)
+    return parteBinaria(mimeBin, datos)
+  if not esTexto(datos):
+    fallar(ruta & tr(
+      " es binario y su tipo no está soportado (png, jpg, webp, pdf, mp3, wav, ogg, m4a, flac, mp4, webm)",
+      " is binary and its format is not supported (png, jpg, webp, pdf, mp3, wav, ogg, m4a, flac, mp4, webm)"))
+  parteTexto(tr("Archivo ", "File ") & extractFilename(ruta) & ":\n" & datos)
+
+proc mostrarModelos(activo: string) =
+  escribirLinea(stdout, tr("Modelos recomendados:", "Recommended models:"))
+  for i, m in modelosRecomendados:
+    let marca = if m == activo: tr(" (activo)", " (active)") else: ""
+    escribirLinea(stdout, "  " & $(i + 1) & ". " & m & marca)
+
+proc elegirModelo(excluir, titulo: string): string =
+  var opciones: seq[string]
+  for m in modelosRecomendados:
+    if m != excluir:
+      opciones.add m
+  escribirLinea(stderr, titulo)
+  for i, m in opciones:
+    escribirLinea(stderr, "  " & $(i + 1) & ". " & m)
+  escribirLinea(stderr, "  0. " & tr("Cancelar", "Cancel"))
+  escribirConsola(stderr, tr("Elige [1-", "Choose [1-") & $opciones.len &
+    tr(", 0 para salir]: ", ", 0 to cancel]: "))
+  stderr.flushFile
+  var resp = ""
+  try:
+    resp = leerLineaConsola().strip()
+  except EOFError, IOError:
+    return ""
+  if resp.len == 0 or resp == "0":
+    return ""
+  try:
+    let idx = parseInt(resp)
+    if idx in 1 .. opciones.len:
+      return opciones[idx - 1]
+  except ValueError:
+    discard
+  ""
+
+proc enviar(clave, modelo, cuerpo: string): tuple[cuerpo, modeloUsado: string] =
   let ctx = crearContextoSsl()
   defer: destroyContext(ctx)
   let cliente = newHttpClient(timeout = 60_000, maxRedirects = 0, sslContext = ctx)
@@ -365,34 +526,53 @@ proc enviar(clave, modelo, cuerpo: string): string =
   cliente.headers = newHttpHeaders({
     "Content-Type": "application/json",
     "x-goog-api-key": clave})
-  let url = urlBase & modelo & ":generateContent"
-  for intento in 1 .. maxIntentos:
-    var detalle: string
-    try:
-      estado(tr("Enviando a Gemini, espera un momento...", "Sending to Gemini, please wait..."))
-      let resp = cliente.post(url, cuerpo)
-      let codigo = int(resp.code)
-      if codigo in 200 .. 299:
-        estado("")
-        return resp.body
-      detalle = "HTTP " & $codigo & ": " & mensajeError(resp.body)
-      if not reintentable(codigo):
+  var modeloActual = modelo
+  while true:
+    let url = urlBase & modeloActual & ":generateContent"
+    var cambiado = false
+    for intento in 1 .. maxIntentos:
+      var detalle: string
+      var saturado = false
+      try:
+        estado(tr("Enviando a Gemini, espera un momento...", "Sending to Gemini, please wait..."))
+        let resp = cliente.post(url, cuerpo)
+        let codigo = int(resp.code)
+        if codigo in 200 .. 299:
+          estado("")
+          return (resp.body, modeloActual)
+        detalle = "HTTP " & $codigo & ": " & mensajeError(resp.body)
+        if codigo in [429, 503]:
+          saturado = true
+        if not reintentable(codigo):
+          fallar(detalle)
+      except TimeoutError:
+        fallar(tr(
+          "Gemini no respondió en 60 s; prueba otro modelo con -m",
+          "Gemini did not respond within 60 s; try another model with -m"))
+      except CatchableError as e:
+        detalle = tr("red: ", "network: ") & e.msg
+      if intento == maxIntentos:
+        if saturado and isatty(stdin) and isatty(stderr):
+          estado("")
+          escribirLinea(stderr, "Error: " & limpiar(detalle))
+          let alt = elegirModelo(modeloActual, tr(
+            "Modelo saturado. ¿Reintentar con otro modelo?",
+            "Model overloaded. Retry with another model?"))
+          if alt.len > 0:
+            modeloActual = alt
+            cambiado = true
+            break
+          quit 1
         fallar(detalle)
-    except TimeoutError:
-      fallar(tr(
-        "Gemini no respondió en 60 s; prueba otro modelo con -m",
-        "Gemini did not respond within 60 s; try another model with -m"))
-    except CatchableError as e:
-      detalle = tr("red: ", "network: ") & e.msg
-    if intento == maxIntentos:
-      fallar(detalle)
-    let aviso = tr("Reintentando (", "Retrying (") & $intento & "/" & $(maxIntentos - 1) & "): " &
-      limpiar(detalle)
-    if isatty(stderr):
-      estado(aviso[0 .. min(aviso.high, 75)])
-    else:
-      escribirLinea(stderr, aviso)
-    sleep(2000 * intento)
+      let aviso = tr("Reintentando (", "Retrying (") & $intento & "/" & $(maxIntentos - 1) & "): " &
+        limpiar(detalle)
+      if isatty(stderr):
+        estado(aviso[0 .. min(aviso.high, 75)])
+      else:
+        escribirLinea(stderr, aviso)
+      sleep(2000 * intento)
+    if not cambiado:
+      break
 
 proc modeloActivo(flagModelo: string): string =
   if flagModelo.len > 0: return flagModelo
@@ -409,20 +589,17 @@ proc mostrarVersionTexto(modeloFlag: string) =
   escribirLinea(stdout, "gemi-cli " & versionApp & " (" & tr("modelo: ", "model: ") &
     limpiar(modeloActivo(modeloFlag)) & ")")
 
-proc responderUnaVez(claveApi, modelo: string, busquedaWeb: bool,
-                     datosStdin: string, archivos, palabras: seq[string]) =
-  let cuerpo = block:
-    var partes: seq[string]
-    if datosStdin.len > 0:
-      partes.add parteTexto(tr("Entrada:\n", "Input:\n") & datosStdin)
-    var total = 0
-    for ruta in archivos:
-      partes.add cargarArchivo(ruta, total)
-    if palabras.len > 0:
-      partes.add parteTexto(palabras.join(" "))
-    armarCuerpo(partes, busquedaWeb)
+proc construirPartes(datosStdin, claveApi: string, archivos, palabras: seq[string],
+                     remotos: var seq[string]): seq[string] =
+  if datosStdin.len > 0:
+    result.add parteTexto(tr("Entrada:\n", "Input:\n") & datosStdin)
+  var total = 0
+  for ruta in archivos:
+    result.add cargarArchivo(ruta, claveApi, total, remotos)
+  if palabras.len > 0:
+    result.add parteTexto(palabras.join(" "))
 
-  let respuestaBruta = enviar(claveApi, modelo, cuerpo)
+proc mostrarRespuesta(respuestaBruta: string, busquedaWeb: bool): string =
   let (texto, motivo) = extraerTexto(respuestaBruta, enEs)
   if texto.len == 0:
     fallar(tr("respuesta sin texto (", "empty response (") & motivo & ")")
@@ -445,17 +622,78 @@ proc responderUnaVez(claveApi, modelo: string, busquedaWeb: bool,
       escribirLinea(stderr, tr(
         "[Aviso] El modelo respondió sin usar búsqueda web.",
         "[Note] Model answered without web search results."))
+  texto
+
+proc responderUnaVez(claveApi, modelo, sistema, rutaImagen: string, busquedaWeb: bool,
+                     datosStdin: string, archivos, palabras: seq[string]) =
+  var remotos: seq[string]
+  defer: borrarArchivosRemotos(claveApi, remotos)
+  let partes = construirPartes(datosStdin, claveApi, archivos, palabras, remotos)
+  let cuerpo = armarCuerpo(partes, busquedaWeb, sistema, generarImagen = rutaImagen.len > 0)
+  let (respuestaBruta, _) = enviar(claveApi, modelo, cuerpo)
+  if rutaImagen.len > 0:
+    let img = extraerImagen(respuestaBruta)
+    if img.datos.len > 0:
+      try:
+        writeFile(rutaImagen, img.datos)
+      except CatchableError as e:
+        fallar(tr("no se pudo guardar la imagen en ", "could not save image to ") & rutaImagen & ": " & e.msg)
+      escribirLinea(stderr, tr("Imagen guardada en ", "Image saved to ") & rutaImagen & " (" & img.mime & ")")
+      let (texto, _) = extraerTexto(respuestaBruta, enEs)
+      if texto.len > 0:
+        escribirLinea(stdout, limpiar(texto))
+      return
+    let (texto, motivo) = extraerTexto(respuestaBruta, enEs)
+    if texto.len > 0:
+      escribirLinea(stdout, limpiar(texto))
+    fallar(tr("el modelo no devolvió ninguna imagen (", "model did not return an image (") & motivo & ")")
+  discard mostrarRespuesta(respuestaBruta, busquedaWeb)
+
+proc ejecutarChat(claveApi, modeloInicial, sistema: string, busquedaWeb: bool,
+                  partesIniciales: seq[string]) =
+  var turnos: seq[Turno]
+  var modeloActual = modeloInicial
+  escribirLinea(stdout, "gemi-cli " & versionApp & " [" & modeloActual & "]" & tr(
+    " — chat en memoria (exit o Enter vacío para salir)",
+    " — in-memory chat (exit or empty Enter to quit)"))
+  if partesIniciales.len > 0:
+    turnos.add ("user", partesIniciales)
+    let cuerpo = armarCuerpoChat(turnos, busquedaWeb, sistema)
+    let (resp, usado) = enviar(claveApi, modeloActual, cuerpo)
+    modeloActual = usado
+    let texto = mostrarRespuesta(resp, busquedaWeb)
+    turnos.add ("model", @[parteTexto(texto)])
+    escribirLinea(stdout, "")
+
+  while true:
+    escribirConsola(stdout, tr("Tú: ", "You: "))
+    stdout.flushFile
+    var entrada = ""
+    try:
+      entrada = leerLineaConsola().strip()
+    except EOFError, IOError:
+      break
+    if entrada.len == 0 or entrada.toLowerAscii() in ["exit", "quit", "salir", "--exit", "--quit"]:
+      break
+    turnos.add ("user", @[parteTexto(entrada)])
+    let cuerpo = armarCuerpoChat(turnos, busquedaWeb, sistema)
+    let (resp, usado) = enviar(claveApi, modeloActual, cuerpo)
+    modeloActual = usado
+    let texto = mostrarRespuesta(resp, busquedaWeb)
+    turnos.add ("model", @[parteTexto(texto)])
+    escribirLinea(stdout, "")
 
 proc main() =
-  var modelo, nuevoModelo: string
+  var modelo, nuevoModelo, sistema, rutaImagen: string
   var configurarClave = false
   var busquedaWeb = false
+  var interactivo = false
   var mostrarVersion = false
   var archivos, palabras: seq[string]
   let (opts, literales) = separarArgs(commandLineParams())
   var p = initOptParser(opts,
-    shortNoVal = {'h', 'v', 'w', 'c'},
-    longNoVal = @["help", "version", "set-key", "web", "credits", "c"],
+    shortNoVal = {'h', 'v', 'w', 'c', 'i'},
+    longNoVal = @["help", "version", "set-key", "web", "credits", "c", "models", "interactive"],
     mode = LaxMode)
   for tipo, clave, val in p.getopt():
     case tipo
@@ -463,12 +701,30 @@ proc main() =
       palabras.add clave
     of cmdShortOption, cmdLongOption:
       case clave
+      of "i", "interactive":
+        if val.len > 0: fallar(tr("-i no recibe argumentos", "-i does not take an argument"))
+        interactivo = true
+      of "s", "system":
+        if val.len == 0: fallar(tr("-s necesita una instrucción", "-s requires a system instruction"))
+        sistema = val
+      of "img":
+        if val.len == 0: fallar(tr("--img necesita una ruta de archivo", "--img requires an output file path"))
+        rutaImagen = val
       of "f", "file":
         if val.len == 0: fallar(tr("-f necesita un archivo", "-f requires a file"))
         archivos.add val
       of "m", "model":
-        modelo = val
-        if modelo.len == 0: fallar(tr("-m necesita un modelo", "-m requires a model"))
+        if val.len == 0:
+          if isatty(stdin) and isatty(stderr):
+            modelo = elegirModelo("", tr("Elige un modelo para esta consulta:", "Choose a model for this query:"))
+            if modelo.len == 0: quit 1
+          else:
+            fallar(tr("-m necesita un modelo", "-m requires a model"))
+        else:
+          modelo = val
+      of "models":
+        mostrarModelos(modeloActivo(modelo))
+        quit 0
       of "w", "web":
         if val.len > 0: fallar(tr("-w no recibe argumentos", "-w does not take an argument"))
         busquedaWeb = true
@@ -479,9 +735,15 @@ proc main() =
             "do not pass the key on the command line (leaks in shell history); run 'gemi --set-key'"))
         configurarClave = true
       of "set-model":
-        if val.len == 0: fallar(tr("--set-model necesita un nombre de modelo", "--set-model requires a model name"))
-        if not modeloValido(val): fallar(tr("nombre de modelo no válido", "invalid model name"))
-        nuevoModelo = val
+        if val.len == 0:
+          if isatty(stdin) and isatty(stderr):
+            nuevoModelo = elegirModelo("", tr("Elige el modelo por defecto:", "Choose default model:"))
+            if nuevoModelo.len == 0: quit 1
+          else:
+            fallar(tr("--set-model necesita un nombre de modelo", "--set-model requires a model name"))
+        else:
+          if not modeloValido(val): fallar(tr("nombre de modelo no válido", "invalid model name"))
+          nuevoModelo = val
       of "v", "version":
         mostrarVersion = true
       of "c", "credits":
@@ -517,8 +779,23 @@ proc main() =
   if configurarClave:
     discard pedirYGuardarClave(esPrimeraVez = false)
 
-  if (nuevoModelo.len > 0 or configurarClave) and
+  if (nuevoModelo.len > 0 or configurarClave) and not interactivo and
      datosStdin.len == 0 and archivos.len == 0 and palabras.len == 0:
+    quit 0
+
+  if interactivo:
+    if not isatty(stdin):
+      fallar(tr("-i requiere una terminal interactiva", "-i requires an interactive terminal"))
+    var claveApi = valor("GEMINI_API_KEY")
+    if claveApi.len == 0:
+      claveApi = pedirYGuardarClave(esPrimeraVez = true)
+    modelo = modeloActivo(modelo)
+    if not modeloValido(modelo):
+      fallar(tr("nombre de modelo no válido", "invalid model name"))
+    var remotos: seq[string]
+    defer: borrarArchivosRemotos(claveApi, remotos)
+    let partesIni = construirPartes(datosStdin, claveApi, archivos, palabras, remotos)
+    ejecutarChat(claveApi, modelo, sistema, busquedaWeb, partesIni)
     quit 0
 
   if datosStdin.len == 0 and archivos.len == 0 and palabras.len == 0:
@@ -547,10 +824,19 @@ proc main() =
             escribirLinea(stdout, "")
           of "--version", "-v":
             mostrarVersionTexto(modelo)
+          of "--models":
+            mostrarModelos(modeloActivo(modelo))
           of "--credits", "-c":
             mostrarCreditos()
           of "--set-key":
             discard pedirYGuardarClave(esPrimeraVez = false)
+          of "--set-model":
+            let m = elegirModelo("", tr("Elige el modelo por defecto:", "Choose default model:"))
+            if m.len > 0:
+              let destino = rutaConfigActiva()
+              guardarConfig(destino, "GEMINI_MODEL", m)
+              escribirLinea(stderr, tr("Modelo por defecto guardado (", "Default model saved (") &
+                m & tr(") en ", ") to ") & destino)
           else:
             if entrada.startsWith("--set-model "):
               let m = entrada[12 .. ^1].strip()
@@ -568,7 +854,7 @@ proc main() =
               let modActual = modeloActivo(modelo)
               if not modeloValido(modActual):
                 fallar(tr("nombre de modelo no válido", "invalid model name"))
-              responderUnaVez(claveApi, modActual, busquedaWeb, "", @[], @[entrada])
+              responderUnaVez(claveApi, modActual, sistema, "", busquedaWeb, "", @[], @[entrada])
               escribirLinea(stdout, "")
     if datosStdin.len == 0 and archivos.len == 0 and palabras.len == 0:
       escribirLinea(stderr, usoTexto())
@@ -578,10 +864,13 @@ proc main() =
   if claveApi.len == 0:
     claveApi = pedirYGuardarClave(esPrimeraVez = true)
 
-  modelo = modeloActivo(modelo)
+  if modelo.len == 0 and rutaImagen.len > 0:
+    modelo = modeloImagenPorDefecto
+  else:
+    modelo = modeloActivo(modelo)
   if not modeloValido(modelo):
     fallar(tr("nombre de modelo no válido", "invalid model name"))
 
-  responderUnaVez(claveApi, modelo, busquedaWeb, datosStdin, archivos, palabras)
+  responderUnaVez(claveApi, modelo, sistema, rutaImagen, busquedaWeb, datosStdin, archivos, palabras)
 
 main()

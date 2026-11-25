@@ -4,6 +4,7 @@ const
   maxTexto* = 1_000_000
   maxBinario* = 8_000_000
   maxTotal* = 16_000_000
+  maxFileApi* = 100_000_000
 
 proc mimeBinario*(ruta: string): string =
   case splitFile(ruta).ext.toLowerAscii()
@@ -13,12 +14,31 @@ proc mimeBinario*(ruta: string): string =
   of ".pdf": "application/pdf"
   else: ""
 
+proc mimeMultimedia*(ruta: string): string =
+  case splitFile(ruta).ext.toLowerAscii()
+  of ".mp3": "audio/mpeg"
+  of ".wav": "audio/wav"
+  of ".ogg": "audio/ogg"
+  of ".m4a": "audio/mp4"
+  of ".flac": "audio/flac"
+  of ".mp4": "video/mp4"
+  of ".webm": "video/webm"
+  else: ""
+
 proc firmaValida*(mime, datos: string): bool =
   case mime
   of "image/png": datos.startsWith("\x89PNG\r\n\x1a\n")
   of "image/jpeg": datos.startsWith("\xFF\xD8\xFF")
   of "image/webp": datos.len >= 12 and datos[0 .. 3] == "RIFF" and datos[8 .. 11] == "WEBP"
   of "application/pdf": datos.startsWith("%PDF-")
+  of "audio/mpeg":
+    datos.startsWith("ID3") or
+      (datos.len >= 2 and ord(datos[0]) == 0xFF and (ord(datos[1]) and 0xE0) == 0xE0)
+  of "audio/wav": datos.len >= 12 and datos[0 .. 3] == "RIFF" and datos[8 .. 11] == "WAVE"
+  of "audio/ogg": datos.startsWith("OggS")
+  of "audio/flac": datos.startsWith("fLaC")
+  of "audio/mp4", "video/mp4": datos.len >= 8 and datos[4 .. 7] == "ftyp"
+  of "video/webm": datos.startsWith("\x1A\x45\xDF\xA3")
   else: false
 
 proc esTexto*(datos: string): bool =
@@ -52,22 +72,68 @@ proc parteBinaria*(mime, datos: string): string =
   result.add encode(datos)
   result.add """"}}"""
 
-proc armarCuerpo*(partes: openArray[string], busquedaWeb = false): string =
-  const sufijoWeb = ""","tools":[{"google_search":{}}]}"""
-  var tam = if busquedaWeb: 64 else: 32
-  for p in partes:
-    tam += p.len + 1
+proc parteArchivoUri*(mime, fileUri: string): string =
+  result = newStringOfCap(mime.len + fileUri.len + 48)
+  result.add """{"fileData":{"mimeType":"""
+  escapeJson(mime, result)
+  result.add ""","fileUri":"""
+  escapeJson(fileUri, result)
+  result.add "}}"
+
+proc extraerInfoArchivo*(cuerpo: string): tuple[uri, nombre, estado: string] =
+  var j: JsonNode
+  try:
+    j = parseJson(cuerpo)
+  except JsonParsingError, ValueError:
+    return
+  let f = if j.hasKey("file"): j["file"] else: j
+  result.uri = f{"uri"}.getStr()
+  result.nombre = f{"name"}.getStr()
+  result.estado = f{"state"}.getStr()
+
+type Turno* = tuple[rol: string, partes: seq[string]]
+
+proc armarCuerpoChat*(turnos: openArray[Turno], busquedaWeb = false, sistema = "",
+                      generarImagen = false): string =
+  const sufijoWeb = ""","tools":[{"google_search":{}}]"""
+  const sufijoImg = ""","generationConfig":{"responseModalities":["TEXT","IMAGE"]}"""
+  var tam = 64
+  if busquedaWeb: tam += 40
+  if generarImagen: tam += 64
+  if sistema.len > 0:
+    tam += sistema.len + 48
+  for t in turnos:
+    tam += t.rol.len + 24
+    for p in t.partes:
+      tam += p.len + 1
   result = newStringOfCap(tam)
-  result.add """{"contents":[{"parts":["""
-  for i, p in partes:
-    if i > 0:
+  result.add "{"
+  if sistema.len > 0:
+    result.add """"systemInstruction":{"parts":["""
+    result.add parteTexto(sistema)
+    result.add "]},"
+  result.add """"contents":["""
+  for ti, t in turnos:
+    if ti > 0:
       result.add ","
-    result.add p
-  result.add """]}]"""
+    result.add """{"role":"""
+    escapeJson(t.rol, result)
+    result.add ""","parts":["""
+    for pi, p in t.partes:
+      if pi > 0:
+        result.add ","
+      result.add p
+    result.add "]}"
+  result.add "]"
   if busquedaWeb:
     result.add sufijoWeb
-  else:
-    result.add "}"
+  if generarImagen:
+    result.add sufijoImg
+  result.add "}"
+
+proc armarCuerpo*(partes: openArray[string], busquedaWeb = false, sistema = "",
+                  generarImagen = false): string =
+  armarCuerpoChat(@[("user", @partes)], busquedaWeb, sistema, generarImagen)
 
 proc modeloValido*(m: string): bool =
   m.len in 1 .. 64 and m.allCharsInSet({'a' .. 'z', 'A' .. 'Z', '0' .. '9', '.', '-', '_'})
@@ -189,6 +255,23 @@ proc extraerTexto*(cuerpo: string, enEs = true): tuple[texto, motivo: string] =
     if bloqueo.len > 0: (if enEs: "bloqueado por " else: "blocked by ") & bloqueo
     elif fin.len > 0: "finishReason=" & fin
     else: (if enEs: "sin detalle" else: "no details")
+
+proc extraerImagen*(cuerpo: string): tuple[mime, datos: string] =
+  var j: JsonNode
+  try:
+    j = parseJson(cuerpo)
+  except JsonParsingError, ValueError:
+    return
+  for parte in j{"candidates"}{0}{"content"}{"parts"}.getElems():
+    let b64 = parte{"inlineData"}{"data"}.getStr()
+    let mime = parte{"inlineData"}{"mimeType"}.getStr()
+    if b64.len > 0 and mime in ["image/png", "image/jpeg", "image/webp"]:
+      try:
+        let raw = decode(b64)
+        if firmaValida(mime, raw):
+          return (mime, raw)
+      except ValueError:
+        discard
 
 proc extraerFuentes*(cuerpo: string): seq[string] =
   var j: JsonNode

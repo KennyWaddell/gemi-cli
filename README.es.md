@@ -44,7 +44,10 @@ Abrir la interfaz web de Gemini en un navegador moderno consume entre **600 MB y
 
 - **Configuración segura en el primer uso (*First-run setup*):** si aún no tienes configurada tu clave de [Google AI Studio](https://aistudio.google.com/apikey), `gemi` te la solicita con entrada oculta en consola (sin dejar rastro en el historial) y la guarda en `~/.config/gemi-cli/config` con permisos `0600` en Linux, o cifrada con **Windows DPAPI** (`CryptProtectData`) en `%APPDATA%\gemi-cli\config` en Windows.
 - **Soporte nativo en Windows 7+:** entrada/salida de consola en UTF-16 (`WriteConsoleW` / `ReadConsoleW`), detección automática del idioma del sistema, `cacert.pem` + OpenSSL 1.1.1k incluidos y prompt interactivo al abrir con doble clic desde el Explorador.
-- **Adjuntos multimodales verificados (`-f`):** adjunta uno o varios archivos de código, texto plano (máx. 1 MB), imágenes (`PNG`, `JPG`, `WEBP`) o documentos `PDF` (máx. 8 MB por archivo, validando la cabecera binaria real y no solo la extensión).
+- **Chat multi-turno opcional (`-i`) e instrucción de sistema (`-s`):** usa `gemi -i` para conversar en varios turnos manteniendo el contexto solo en RAM (sin guardar nada en disco) y `-s "..."` para fijar una `systemInstruction`.
+- **Adjuntos multimodales y File API (`-f`):** adjunta código/texto (hasta 1 MB) o `PNG`, `JPG`, `WEBP`, `PDF` (hasta 8 MB inline), y sube automáticamente en bloques de 1 MB PDFs pesados (`> 8 MB` hasta `100 MB`) y audio/vídeo (`MP3`, `WAV`, `OGG`, `M4A`, `FLAC`, `MP4`, `WEBM`) mediante la File API (borrado remoto automático al terminar).
+- **Selector de modelos y respaldo ante `503`/`429`:** ejecuta `gemi --models` (o `-m` / `--set-model` sin nombre) para elegir entre 5 modelos ligeros recomendados (`gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, `gemini-3.8-flash`, `gemma-4-31b-it`, `gemma-4-26b-a4b-it`); si un modelo se satura (`503`/`429`), te ofrece reintentar con otro al instante.
+- **Generación de imágenes (`--img`):** opción `--img salida.png "prompt"` usando `gemini-3.1-flash-image` (requiere cuota/facturación para modelos `*-image` en AI Studio).
 - **Formato limpio en terminal:** ajusta automáticamente el texto al ancho de tu ventana sin cortar palabras por la mitad, alinea listas y respeta intactos los bloques de código y las redirecciones a archivos (`>`).
 - **Búsqueda web en tiempo real opcional (`-w` / `--web`):** conecta la consulta a Google Search Grounding cuando necesitas datos actuales e imprime las fuentes/URLs al final (o avisa si respondió sin búsqueda), manteniéndolo apagado por defecto para cuidar tu velocidad y tu cuota diaria.
 - **Interfaz bilingüe automática:** detecta `LC_ALL` / `LC_MESSAGES` / `LANG` para mostrar ayuda, avisos y errores en español o en inglés por defecto.
@@ -79,7 +82,7 @@ Para desinstalar:
 
 Probado de forma nativa en **Windows 7 SP1** (sin capas de compatibilidad) y compatible con **Windows 8.1, 10 (LTSB/LTSC) y 11**.
 
-1. Descarga `gemi-cli-v1.0.0-win64.zip` desde [GitHub Releases](https://github.com/KennyWaddell/gemi-cli/releases) y verifica su suma con `SHA256.txt`.
+1. Descarga `gemi-cli-v1.1.0-win64.zip` desde [GitHub Releases](https://github.com/KennyWaddell/gemi-cli/releases) y verifica su suma con `SHA256.txt`.
 2. Descomprime la carpeta `Gemi-CLI Windows` (mantén juntos `gemi.exe`, `cacert.pem`, `libcrypto-1_1-x64.dll` y `libssl-1_1-x64.dll`).
 3. **Haz doble clic en `gemi.exe`** para preguntar directamente (acepta `--help`, `--set-key`, `--set-model` y `exit`/`salir` para cerrar), **o** abre `cmd.exe` / PowerShell:
    ```cmd
@@ -125,9 +128,13 @@ Para fijar un modelo distinto de forma permanente sin escribir `-m` cada vez, ej
 
 | Opción | Descripción |
 | :--- | :--- |
+| `-i`, `--interactive` | Inicia un chat multi-turno en memoria (sin historial en disco). |
+| `-s`, `--system <regla>` | Fija una instrucción de sistema (`systemInstruction`) para el modelo. |
 | `-w`, `--web` | Activa búsqueda en vivo con Google Search Grounding para datos actuales. |
-| `-m`, `--model <id>` | Usa un modelo específico en esa consulta (ej. `gemini-3.8-flash`). Por defecto usa `gemini-3.5-flash-lite` por ofrecer la menor latencia y la cuota gratuita diaria más alta en AI Studio. |
-| `-f`, `--file <ruta>` | Adjunta un archivo de texto/código (máx. 1 MB) o binario (`PNG`, `JPG`, `WEBP`, `PDF`, máx. 8 MB). Se puede repetir varias veces (tope total: 16 MB). |
+| `-m`, `--model <id>` | Usa otro modelo (si omites `<id>` en terminal interactiva abre el selector de 5 modelos). |
+| `--models` | Muestra los 5 modelos ligeros recomendados e indica cuál está activo. |
+| `-f`, `--file <ruta>` | Adjunta texto (`<=1 MB`), `PNG`/`JPG`/`WEBP`/`PDF` (`<=8 MB` inline), o PDFs pesados (`<=100 MB`) y audio/vídeo (`MP3`, `WAV`, `OGG`, `M4A`, `FLAC`, `MP4`, `WEBM`) por bloques vía File API. |
+| `--img <ruta>` | Genera una imagen (`PNG`/`JPG`/`WEBP`) con `gemini-3.1-flash-image` (requiere cuota `*-image`). |
 | `--set-key` | Solicita y guarda tu `GEMINI_API_KEY` con entrada oculta (`0600` en Linux, DPAPI en Windows). |
 | `--set-model <id>` | Cambia y guarda de forma permanente tu modelo por defecto en `config`. |
 | `-v`, `--version` | Muestra la versión instalada y el modelo activo actual. |
@@ -142,9 +149,10 @@ Para fijar un modelo distinto de forma permanente sin escribir `-m` cada vez, ej
 Para mantener el ejecutable en ~245 KB, sin dependencias externas y apto para PCs con 2 GB de RAM, Gemi-CLI aplica decisiones de diseño deliberadas:
 
 - **Modelo BYOK (*Bring Your Own Key*):** no incluye claves preconfiguradas. Requiere tu propia clave gratuita o de pago de [Google AI Studio](https://aistudio.google.com/apikey) y está sujeto a los límites de peticiones (RPM/RPD) de tu proyecto en Google Cloud.
-- **Consultas independientes (*stateless*):** cada ejecución es independiente y no guarda historial de conversaciones en disco, priorizando privacidad y bajo uso de memoria.
+- **Sin historial en disco (modo `-i` opcional en RAM):** las consultas normales son independientes; `-i` conserva los turnos solo en memoria durante la sesión y nunca guarda historiales en disco.
 - **Respuesta completa (sin *streaming* token a token):** utiliza el cliente HTTPS estándar de Nim (`std/httpclient`), por lo que imprime la respuesta formateada una vez recibida completa.
-- **Límites estrictos de tamaño:** hasta `1 MB` para texto/tuberías (`stdin`) y `8 MB` por imagen o PDF (`16 MB` combinados) para evitar desbordamientos de RAM o *swapping* en discos mecánicos. No procesa archivos de audio ni vídeo pesado.
+- **Límites estrictos de memoria:** hasta `1 MB` para texto/tuberías (`stdin`), `8 MB` por imagen o PDF inline (`16 MB` combinados), y hasta `100 MB` para PDFs pesados o audio/vídeo subidos en bloques de `1 MB` vía File API para evitar desbordamientos de RAM en equipos de 2 GB.
+- **Generación de imágenes (`--img`):** actualmente la capa gratuita de Google AI Studio tiene cuota `0` en modelos `*-image`, por lo que `--img` requiere una API key con facturación activa y queda listo por si Google habilita cuota gratuita más adelante.
 
 ---
 
