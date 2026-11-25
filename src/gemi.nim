@@ -4,7 +4,7 @@ when defined(windows):
   import std/base64
 
 const
-  versionApp = "1.1.0"
+  versionApp = "1.1.1"
   modeloPorDefecto = "gemini-3.5-flash-lite"
   modeloImagenPorDefecto = "gemini-3.1-flash-image"
   modelosRecomendados = [
@@ -29,6 +29,7 @@ const
       --models       muestra los 5 modelos ligeros recomendados
   -f, --file         adjunta archivo (se puede repetir). Texto (<=1 MB), imagen/PDF
                      (<=8 MB inline, o >8 MB hasta 100 MB y audio/vídeo vía File API)
+  -o, --out          guarda la respuesta en .md o .txt (CRLF compatible con Windows)
       --img          genera una imagen y la guarda en el archivo indicado
       --set-key      configura o reemplaza tu GEMINI_API_KEY de forma oculta
       --set-model    guarda el modelo por defecto (sin valor abre selector)
@@ -49,6 +50,7 @@ Clave (orden de prioridad):
       --models       show the 5 recommended lightweight models
   -f, --file         attach a file; repeatable. Text (<=1 MB), image/PDF (<=8 MB
                      inline, or >8 MB up to 100 MB & audio/video via File API)
+  -o, --out          save response to .md or .txt (Windows-friendly CRLF)
       --img          generate an image and save it to the given file path
       --set-key      set or update your GEMINI_API_KEY with hidden input
       --set-model    save default model in config (no value opens selector)
@@ -599,6 +601,27 @@ proc construirPartes(datosStdin, claveApi: string, archivos, palabras: seq[strin
   if palabras.len > 0:
     result.add parteTexto(palabras.join(" "))
 
+proc guardarArchivoSalida(ruta, contenido: string) =
+  try:
+    writeFile(ruta, formatearSalidaArchivo(contenido, ruta))
+    escribirLinea(stderr, tr("Guardado en ", "Saved to ") & ruta)
+  except CatchableError as e:
+    escribirLinea(stderr, tr("Error al guardar en ", "Error saving to ") & ruta & ": " & e.msg)
+
+proc pedirRutaGuardar(arg: string): string =
+  let limpio = arg.strip(chars = {' ', '\t', '"', '\''})
+  if limpio.len > 0:
+    return limpio
+  escribirConsola(stdout, tr(
+    "Archivo a guardar (.txt o .md, ej: notas.txt) [Enter = gemi-chat.md]: ",
+    "Save file (.txt or .md, e.g. notes.txt) [Enter = gemi-chat.md]: "))
+  stdout.flushFile
+  try:
+    let r = leerLineaConsola().strip(chars = {' ', '\t', '"', '\''})
+    if r.len > 0: r else: "gemi-chat.md"
+  except EOFError, IOError:
+    ""
+
 proc mostrarRespuesta(respuestaBruta: string, busquedaWeb: bool): string =
   let (texto, motivo) = extraerTexto(respuestaBruta, enEs)
   if texto.len == 0:
@@ -606,8 +629,8 @@ proc mostrarRespuesta(respuestaBruta: string, busquedaWeb: bool): string =
   let limpio = limpiar(texto)
   if isatty(stdout):
     let cols = terminalWidth()
-    let ancho = if cols > 4: cols - 2 else: 80
-    escribirLinea(stdout, ajustarAncho(limpio, ancho))
+    let ancho = if cols > 8: cols - 4 else: 74
+    escribirLinea(stdout, ajustarAncho(formatearTerminal(limpio), ancho))
   else:
     escribirLinea(stdout, limpio)
 
@@ -624,8 +647,9 @@ proc mostrarRespuesta(respuestaBruta: string, busquedaWeb: bool): string =
         "[Note] Model answered without web search results."))
   texto
 
-proc responderUnaVez(claveApi, modelo, sistema, rutaImagen: string, busquedaWeb: bool,
-                     datosStdin: string, archivos, palabras: seq[string]) =
+proc responderUnaVez(claveApi, modelo, sistema, rutaImagen, rutaSalida: string,
+                     busquedaWeb: bool, datosStdin: string,
+                     archivos, palabras: seq[string]): string =
   var remotos: seq[string]
   defer: borrarArchivosRemotos(claveApi, remotos)
   let partes = construirPartes(datosStdin, claveApi, archivos, palabras, remotos)
@@ -642,27 +666,36 @@ proc responderUnaVez(claveApi, modelo, sistema, rutaImagen: string, busquedaWeb:
       let (texto, _) = extraerTexto(respuestaBruta, enEs)
       if texto.len > 0:
         escribirLinea(stdout, limpiar(texto))
-      return
+      return ""
     let (texto, motivo) = extraerTexto(respuestaBruta, enEs)
     if texto.len > 0:
       escribirLinea(stdout, limpiar(texto))
     fallar(tr("el modelo no devolvió ninguna imagen (", "model did not return an image (") & motivo & ")")
-  discard mostrarRespuesta(respuestaBruta, busquedaWeb)
+  result = mostrarRespuesta(respuestaBruta, busquedaWeb)
+  if rutaSalida.len > 0:
+    guardarArchivoSalida(rutaSalida, limpiar(result))
 
-proc ejecutarChat(claveApi, modeloInicial, sistema: string, busquedaWeb: bool,
-                  partesIniciales: seq[string]) =
+proc ejecutarChat(claveApi, modeloInicial, sistema, rutaSalida: string,
+                  busquedaWeb: bool, partesIniciales: seq[string],
+                  textoInicial: string) =
   var turnos: seq[Turno]
+  var historial: seq[string]
   var modeloActual = modeloInicial
   escribirLinea(stdout, "gemi-cli " & versionApp & " [" & modeloActual & "]" & tr(
-    " — chat en memoria (exit o Enter vacío para salir)",
-    " — in-memory chat (exit or empty Enter to quit)"))
+    " — chat en memoria (/save para guardar, exit o Enter vacío para salir)",
+    " — in-memory chat (/save to export, exit or empty Enter to quit)"))
   if partesIniciales.len > 0:
     turnos.add ("user", partesIniciales)
     let cuerpo = armarCuerpoChat(turnos, busquedaWeb, sistema)
     let (resp, usado) = enviar(claveApi, modeloActual, cuerpo)
     modeloActual = usado
+    escribirLinea(stdout, "")
     let texto = mostrarRespuesta(resp, busquedaWeb)
     turnos.add ("model", @[parteTexto(texto)])
+    if textoInicial.len > 0:
+      historial.add "## " & tr("Tú", "You") & "\n" & textoInicial & "\n\n## Gemini\n" & limpiar(texto) & "\n"
+    else:
+      historial.add "## Gemini\n" & limpiar(texto) & "\n"
     escribirLinea(stdout, "")
 
   while true:
@@ -675,16 +708,30 @@ proc ejecutarChat(claveApi, modeloInicial, sistema: string, busquedaWeb: bool,
       break
     if entrada.len == 0 or entrada.toLowerAscii() in ["exit", "quit", "salir", "--exit", "--quit"]:
       break
+    if entrada == "/save" or entrada == "/guardar" or
+       entrada.startsWith("/save ") or entrada.startsWith("/guardar "):
+      if historial.len == 0:
+        escribirLinea(stderr, tr("Aún no hay respuestas para guardar.", "No responses to save yet."))
+        continue
+      let arg = if entrada.startsWith("/guardar"): entrada[8 .. ^1].strip() else: entrada[5 .. ^1].strip()
+      let dest = pedirRutaGuardar(arg)
+      if dest.len > 0:
+        guardarArchivoSalida(dest, historial.join("\n"))
+      continue
     turnos.add ("user", @[parteTexto(entrada)])
     let cuerpo = armarCuerpoChat(turnos, busquedaWeb, sistema)
     let (resp, usado) = enviar(claveApi, modeloActual, cuerpo)
     modeloActual = usado
+    escribirLinea(stdout, "")
     let texto = mostrarRespuesta(resp, busquedaWeb)
     turnos.add ("model", @[parteTexto(texto)])
+    historial.add "## " & tr("Tú", "You") & "\n" & entrada & "\n\n## Gemini\n" & limpiar(texto) & "\n"
     escribirLinea(stdout, "")
+  if rutaSalida.len > 0 and historial.len > 0:
+    guardarArchivoSalida(rutaSalida, historial.join("\n"))
 
 proc main() =
-  var modelo, nuevoModelo, sistema, rutaImagen: string
+  var modelo, nuevoModelo, sistema, rutaImagen, rutaSalida: string
   var configurarClave = false
   var busquedaWeb = false
   var interactivo = false
@@ -710,6 +757,9 @@ proc main() =
       of "img":
         if val.len == 0: fallar(tr("--img necesita una ruta de archivo", "--img requires an output file path"))
         rutaImagen = val
+      of "o", "out":
+        if val.len == 0: fallar(tr("-o necesita una ruta de archivo", "-o requires an output file path"))
+        rutaSalida = val
       of "f", "file":
         if val.len == 0: fallar(tr("-f necesita un archivo", "-f requires a file"))
         archivos.add val
@@ -795,16 +845,17 @@ proc main() =
     var remotos: seq[string]
     defer: borrarArchivosRemotos(claveApi, remotos)
     let partesIni = construirPartes(datosStdin, claveApi, archivos, palabras, remotos)
-    ejecutarChat(claveApi, modelo, sistema, busquedaWeb, partesIni)
+    ejecutarChat(claveApi, modelo, sistema, rutaSalida, busquedaWeb, partesIni, palabras.join(" "))
     quit 0
 
   if datosStdin.len == 0 and archivos.len == 0 and palabras.len == 0:
     when defined(windows):
       if consolaPropia() and isatty(stdin):
         esperarAlSalir = true
+        var historialWin: seq[string]
         escribirLinea(stdout, "gemi-cli " & versionApp & tr(
-          " (escribe --help para ver comandos, exit o Enter vacío para salir)",
-          " (type --help for commands, exit or empty Enter to quit)"))
+          " (--help para comandos, /save para guardar, exit o Enter vacío para salir)",
+          " (--help for commands, /save to export, exit or empty Enter to quit)"))
         while true:
           escribirConsola(stdout, tr(
             "¿Qué le quieres preguntar a Gemini? ",
@@ -817,6 +868,16 @@ proc main() =
             entrada = ""
           if entrada.len == 0 or entrada.toLowerAscii() in ["exit", "quit", "salir", "--exit", "--quit"]:
             quit 0
+          if entrada == "/save" or entrada == "/guardar" or
+             entrada.startsWith("/save ") or entrada.startsWith("/guardar "):
+            if historialWin.len == 0:
+              escribirLinea(stderr, tr("Aún no hay respuestas para guardar.", "No responses to save yet."))
+              continue
+            let arg = if entrada.startsWith("/guardar"): entrada[8 .. ^1].strip() else: entrada[5 .. ^1].strip()
+            let dest = pedirRutaGuardar(arg)
+            if dest.len > 0:
+              guardarArchivoSalida(dest, historialWin.join("\n"))
+            continue
           case entrada
           of "--help", "-h", "--comandos":
             escribirLinea(stdout, "")
@@ -826,6 +887,15 @@ proc main() =
             mostrarVersionTexto(modelo)
           of "--models":
             mostrarModelos(modeloActivo(modelo))
+          of "-i", "--interactive":
+            var claveApi = valor("GEMINI_API_KEY")
+            if claveApi.len == 0:
+              claveApi = pedirYGuardarClave(esPrimeraVez = true)
+            let modActual = modeloActivo(modelo)
+            if not modeloValido(modActual):
+              fallar(tr("nombre de modelo no válido", "invalid model name"))
+            ejecutarChat(claveApi, modActual, sistema, rutaSalida, busquedaWeb, @[], "")
+            quit 0
           of "--credits", "-c":
             mostrarCreditos()
           of "--set-key":
@@ -854,7 +924,10 @@ proc main() =
               let modActual = modeloActivo(modelo)
               if not modeloValido(modActual):
                 fallar(tr("nombre de modelo no válido", "invalid model name"))
-              responderUnaVez(claveApi, modActual, sistema, "", busquedaWeb, "", @[], @[entrada])
+              escribirLinea(stdout, "")
+              let respTxt = responderUnaVez(claveApi, modActual, sistema, "", "", busquedaWeb, "", @[], @[entrada])
+              if respTxt.len > 0:
+                historialWin.add "## " & tr("Tú", "You") & "\n" & entrada & "\n\n## Gemini\n" & limpiar(respTxt) & "\n"
               escribirLinea(stdout, "")
     if datosStdin.len == 0 and archivos.len == 0 and palabras.len == 0:
       escribirLinea(stderr, usoTexto())
@@ -871,6 +944,6 @@ proc main() =
   if not modeloValido(modelo):
     fallar(tr("nombre de modelo no válido", "invalid model name"))
 
-  responderUnaVez(claveApi, modelo, sistema, rutaImagen, busquedaWeb, datosStdin, archivos, palabras)
+  discard responderUnaVez(claveApi, modelo, sistema, rutaImagen, rutaSalida, busquedaWeb, datosStdin, archivos, palabras)
 
 main()

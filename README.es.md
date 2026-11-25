@@ -82,7 +82,7 @@ Para desinstalar:
 
 Probado de forma nativa en **Windows 7 SP1** (sin capas de compatibilidad) y compatible con **Windows 8.1, 10 (LTSB/LTSC) y 11**.
 
-1. Descarga `gemi-cli-v1.1.0-win64.zip` desde [GitHub Releases](https://github.com/KennyWaddell/gemi-cli/releases) y verifica su suma con `SHA256.txt`.
+1. Descarga `gemi-cli-v1.1.1-win64.zip` desde [GitHub Releases](https://github.com/KennyWaddell/gemi-cli/releases) y verifica su suma con `SHA256.txt`.
 2. Descomprime la carpeta `Gemi-CLI Windows` (mantén juntos `gemi.exe`, `cacert.pem`, `libcrypto-1_1-x64.dll` y `libssl-1_1-x64.dll`).
 3. **Haz doble clic en `gemi.exe`** para preguntar directamente (acepta `--help`, `--set-key`, `--set-model` y `exit`/`salir` para cerrar), **o** abre `cmd.exe` / PowerShell:
    ```cmd
@@ -134,6 +134,7 @@ Para fijar un modelo distinto de forma permanente sin escribir `-m` cada vez, ej
 | `-m`, `--model <id>` | Usa otro modelo (si omites `<id>` en terminal interactiva abre el selector de 5 modelos). |
 | `--models` | Muestra los 5 modelos ligeros recomendados e indica cuál está activo. |
 | `-f`, `--file <ruta>` | Adjunta texto (`<=1 MB`), `PNG`/`JPG`/`WEBP`/`PDF` (`<=8 MB` inline), o PDFs pesados (`<=100 MB`) y audio/vídeo (`MP3`, `WAV`, `OGG`, `M4A`, `FLAC`, `MP4`, `WEBM`) por bloques vía File API. |
+| `-o`, `--out <ruta>` | Guarda la respuesta (o charla `-i`) en `.md` o `.txt` CRLF para Windows (en la carpeta actual o ruta indicada). |
 | `--img <ruta>` | Genera una imagen (`PNG`/`JPG`/`WEBP`) con `gemini-3.1-flash-image` (requiere cuota `*-image`). |
 | `--set-key` | Solicita y guarda tu `GEMINI_API_KEY` con entrada oculta (`0600` en Linux, DPAPI en Windows). |
 | `--set-model <id>` | Cambia y guarda de forma permanente tu modelo por defecto en `config`. |

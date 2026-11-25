@@ -1,5 +1,5 @@
 ================================================================================
-gemi-cli v1.1.0 (Windows x64 Portable)
+gemi-cli v1.1.1 (Windows x64 Portable)
 Lightweight Gemini CLI for modest hardware (Windows 7 SP1 / 8.1 / 10 / 11)
 ================================================================================
 
@@ -31,6 +31,7 @@ Commands & Options
   gemi --models               List the 5 recommended lightweight models
   gemi -f <file> "prompt"     Attach text (<=1 MB), image/PDF (<=8 MB inline,
                               or >8 MB up to 100 MB & audio/video via File API)
+  gemi -o out.txt "prompt"    Save response to .md or Windows CRLF .txt
   gemi --img out.png "prompt" Generate an image (requires *-image quota/billing)
   type file.txt | gemi "ask"  Read text from standard input (max 1 MB)
   systeminfo | gemi "ask"     Analyze your PC hardware via pipe
@@ -40,8 +41,9 @@ Commands & Options
   gemi --credits              Show credits and repository
   gemi --help                 Show full help
 
-  Note: When double-clicking gemi.exe, you can also type --help, --models,
-  --set-key, --set-model, --version, --credits, or exit/quit to close.
+  Note: When double-clicking gemi.exe, you can also type -i, --help, --models,
+  /save [file_or_path] (e.g. /save notes.txt or /save C:\...\notes.txt,
+  with or without quotes), --set-key, --set-model, --version, --credits, or exit.
 
 Credits & License
   Created by Kenny Waddell
@@ -77,6 +79,7 @@ Comandos y opciones
   gemi --models               Mostrar los 5 modelos ligeros recomendados
   gemi -f <archivo> "preg."   Adjuntar texto (<=1 MB), imagen/PDF (<=8 MB inline,
                               o >8 MB hasta 100 MB y audio/vídeo vía File API)
+  gemi -o nota.txt "preg."    Guardar respuesta en .md o .txt CRLF para Windows
   gemi --img out.png "preg."  Generar imagen (requiere cuota/billing *-image)
   type archivo.txt | gemi "p" Leer entrada desde tubería (máx. 1 MB)
   systeminfo | gemi "preg."   Analizar el hardware de tu PC por tubería
@@ -86,8 +89,9 @@ Comandos y opciones
   gemi --credits              Mostrar créditos y repositorio
   gemi --help                 Mostrar la ayuda completa
 
-  Nota: Al abrir gemi.exe con doble clic también puedes escribir --help,
-  --models, --set-key, --set-model, --version, --credits o exit/salir.
+  Nota: Al abrir gemi.exe con doble clic también puedes escribir -i, --help,
+  --models, /save [archivo_o_ruta] (ej. /save notas.txt o /save C:\...\notas.txt,
+  con o sin comillas), --set-key, --set-model, --version, --credits o exit.
 
 Créditos y licencia
   Creado por Kenny Waddell

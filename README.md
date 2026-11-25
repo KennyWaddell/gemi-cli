@@ -82,7 +82,7 @@ To uninstall:
 
 Tested natively on **Windows 7 SP1** (without compatibility wrappers) and compatible with **Windows 8.1, 10 (LTSB/LTSC), and 11**.
 
-1. Download `gemi-cli-v1.1.0-win64.zip` from [GitHub Releases](https://github.com/KennyWaddell/gemi-cli/releases) and verify its checksum against `SHA256.txt`.
+1. Download `gemi-cli-v1.1.1-win64.zip` from [GitHub Releases](https://github.com/KennyWaddell/gemi-cli/releases) and verify its checksum against `SHA256.txt`.
 2. Extract the `Gemi-CLI Windows` folder (keep `gemi.exe`, `cacert.pem`, `libcrypto-1_1-x64.dll`, and `libssl-1_1-x64.dll` together).
 3. **Double-click `gemi.exe`** to ask questions directly (supports `--help`, `--set-key`, `--set-model`, and `exit`/`quit` to close), **or** open `cmd.exe` / PowerShell:
    ```cmd
@@ -134,6 +134,7 @@ To set a custom default model permanently, run `gemi --set-model model_name`. Yo
 | `-m`, `--model <id>` | Overrides the model for that query (omit `<id>` in interactive mode to pick from 5 recommended models). |
 | `--models` | Lists the 5 recommended lightweight models and highlights the active one. |
 | `-f`, `--file <path>` | Attaches text (`<=1 MB`), `PNG`/`JPG`/`WEBP`/`PDF` (`<=8 MB` inline), or heavy PDFs (`<=100 MB`) and audio/video (`MP3`, `WAV`, `OGG`, `M4A`, `FLAC`, `MP4`, `WEBM`) via chunked File API upload. |
+| `-o`, `--out <path>` | Saves the response (or `-i` chat) to `.md` or Windows-friendly `.txt` (CRLF) in the current folder or given path. |
 | `--img <path>` | Generates an image (`PNG`/`JPG`/`WEBP`) via `gemini-3.1-flash-image` (requires `*-image` quota). |
 | `--set-key` | Prompts for and stores your `GEMINI_API_KEY` with hidden input (`0600` on Linux, DPAPI on Windows). |
 | `--set-model <id>` | Permanently updates your default model inside `config`. |

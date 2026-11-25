@@ -66,6 +66,20 @@ suite "ajustarAncho":
     check ls[0].startsWith("*   Elemento")
     check ls[1].startsWith("    ")
     check "int linea_muy_larga_de_codigo_que_no_debe_partirse_jamas = 123456789;" in salida
+  test "formatearTerminal limpia Markdown y ajusta runas UTF-8 sin cortar palabras":
+    let md = "### Título\n\nTexto con **negrita** y acentós.\n* Primer ítem largo\n---\n```\n**no tocar**\n```"
+    let fmt = formatearTerminal(md)
+    check "###" notin fmt
+    check "Texto con negrita y acentós." in fmt
+    check "• Primer ítem largo" in fmt
+    check "──────────" in fmt
+    check "**no tocar**" in fmt
+    let envuelto = ajustarAncho("Error 1060 y arrancar sin cortar", 40)
+    check "1060" in envuelto and "arrancar" in envuelto
+    let txtWin = formatearSalidaArchivo("### Hola\n**Mundo**", "nota.txt")
+    check "\r\n" in txtWin and "###" notin txtWin and "**" notin txtWin
+    let mdKeep = formatearSalidaArchivo("### Hola\n**Mundo**", "nota.md")
+    check mdKeep == "### Hola\n**Mundo**"
 
 suite "extraerTexto":
   test "une varias partes":

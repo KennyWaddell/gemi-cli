@@ -1,4 +1,4 @@
-import std/[base64, json, os, strutils, wordwrap]
+import std/[base64, json, os, strutils, unicode]
 
 const
   maxTexto* = 1_000_000
@@ -208,6 +208,67 @@ proc limpiar*(s: string): string =
     if (c >= ' ' and c != '\x7f') or c in {'\n', '\t'}:
       result.add c
 
+proc formatearTerminal*(s: string): string =
+  let lineas = s.split('\n')
+  result = newStringOfCap(s.len)
+  var enCodigo = false
+  for idx, linea in lineas:
+    if idx > 0:
+      result.add '\n'
+    let recortada = linea.strip(leading = true, trailing = false)
+    if recortada.startsWith("```"):
+      enCodigo = not enCodigo
+      result.add linea
+      continue
+    if enCodigo:
+      result.add linea
+      continue
+    if recortada == "---" or recortada == "***":
+      result.add "────────────────────────────────────────"
+      continue
+    var l = linea.replace("**", "")
+    let lRec = l.strip(leading = true, trailing = false)
+    if lRec.startsWith("#"):
+      var i = 0
+      while i < lRec.len and lRec[i] == '#':
+        inc i
+      if i > 0 and i < lRec.len and lRec[i] == ' ':
+        result.add lRec[i + 1 .. ^1].strip()
+        continue
+    let sangria = l.len - lRec.len
+    if (lRec.startsWith("* ") or lRec.startsWith("- ")) and lRec.len > 2:
+      result.add l[0 ..< sangria] & "• " & lRec[2 .. ^1].strip(leading = true, trailing = false)
+    else:
+      result.add l
+
+proc formatearSalidaArchivo*(contenido, ruta: string): string =
+  if splitFile(ruta).ext.toLowerAscii() == ".txt":
+    formatearTerminal(contenido).replace("\n", "\r\n")
+  else:
+    contenido
+
+proc envolverRunas(texto: string, util: int, cont: string): string =
+  result = newStringOfCap(texto.len + 16)
+  var col = 0
+  var primero = true
+  for palabra in texto.split(' '):
+    if palabra.len == 0:
+      continue
+    let wLen = runeLen(palabra)
+    if primero:
+      result.add palabra
+      col = wLen
+      primero = false
+    elif col + 1 + wLen <= util:
+      result.add ' '
+      result.add palabra
+      col += 1 + wLen
+    else:
+      result.add '\n'
+      result.add cont
+      result.add palabra
+      col = wLen
+
 proc ajustarAncho*(s: string, ancho: int): string =
   let tope = clamp(ancho, 40, 88)
   let lineas = s.split('\n')
@@ -234,11 +295,14 @@ proc ajustarAncho*(s: string, ancho: int): string =
         inc extra
       prefijo.add cuerpo[0 ..< extra]
       cuerpo = cuerpo[extra .. ^1]
-      cont = spaces(prefijo.len)
-    let util = max(20, tope - prefijo.len)
+      cont = spaces(runeLen(prefijo))
+    elif cuerpo.startsWith("• ") and cuerpo.len > 4:
+      prefijo.add "• "
+      cuerpo = cuerpo[4 .. ^1]
+      cont = spaces(runeLen(prefijo))
+    let util = max(20, tope - runeLen(prefijo))
     result.add prefijo
-    result.add wrapWords(cuerpo, maxLineWidth = util, splitLongWords = false,
-      newLine = "\n" & cont)
+    result.add envolverRunas(cuerpo, util, cont)
 
 proc extraerTexto*(cuerpo: string, enEs = true): tuple[texto, motivo: string] =
   var j: JsonNode
