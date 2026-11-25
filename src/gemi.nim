@@ -1,5 +1,7 @@
 import std/[httpclient, net, os, parseopt, strutils, terminal]
 import gemi_core
+when defined(windows):
+  import std/base64
 
 const
   versionApp = "1.0.0"
@@ -21,8 +23,7 @@ const
 
 Clave (orden de prioridad):
   1. Variable de entorno GEMINI_API_KEY
-  2. Modo portable: gemi.cfg junto al ejecutable (si existe)
-  3. Usuario: ~/.config/gemi-cli/config (Linux) o %APPDATA%\gemi-cli\config (Windows)"""
+  2. Usuario: ~/.config/gemi-cli/config (Linux) o %APPDATA%\gemi-cli\config (Windows, DPAPI)"""
   usoEn = """Usage: gemi [-w] [-m model] [-f file] [--] "prompt"
        cat file | gemi "prompt"
 
@@ -38,36 +39,127 @@ Clave (orden de prioridad):
 
 API Key priority:
   1. GEMINI_API_KEY environment variable
-  2. Portable mode: gemi.cfg next to the executable (if present)
-  3. User config: ~/.config/gemi-cli/config (Linux) or %APPDATA%\gemi-cli\config (Windows)"""
+  2. User config: ~/.config/gemi-cli/config (Linux) or %APPDATA%\gemi-cli\config (Windows, DPAPI)"""
 
-let enEs = detectarEspanol(getEnv("LC_ALL"), getEnv("LC_MESSAGES"), getEnv("LANG"))
+when defined(windows):
+  proc getUserDefaultUILanguage(): uint16 {.stdcall, dynlib: "kernel32", importc: "GetUserDefaultUILanguage".}
+  proc getStdHandle(nStdHandle: int32): int {.stdcall, dynlib: "kernel32", importc: "GetStdHandle".}
+  proc writeConsoleW(hConsoleOutput: int, lpBuffer: pointer, nNumberOfCharsToWrite: uint32,
+                     lpNumberOfCharsWritten: ptr uint32, lpReserved: pointer): int32 {.
+                     stdcall, dynlib: "kernel32", importc: "WriteConsoleW".}
+  proc readConsoleW(hConsoleInput: int, lpBuffer: pointer, nNumberOfCharsToRead: uint32,
+                    lpNumberOfCharsRead: ptr uint32, pInputControl: pointer): int32 {.
+                    stdcall, dynlib: "kernel32", importc: "ReadConsoleW".}
+  proc getConsoleProcessList(lpdwProcessList: ptr uint32, dwProcessCount: uint32): uint32 {.
+                             stdcall, dynlib: "kernel32", importc: "GetConsoleProcessList".}
+  proc getConsoleMode(hConsoleHandle: int, lpMode: ptr uint32): int32 {.
+                      stdcall, dynlib: "kernel32", importc: "GetConsoleMode".}
+  proc setConsoleMode(hConsoleHandle: int, dwMode: uint32): int32 {.
+                      stdcall, dynlib: "kernel32", importc: "SetConsoleMode".}
+  proc localFree(hMem: pointer): pointer {.stdcall, dynlib: "kernel32", importc: "LocalFree".}
+
+  type
+    DataBlob = object
+      cbData: uint32
+      pbData: ptr byte
+
+  proc cryptProtectData(pDataIn: ptr DataBlob, szDataDescr: pointer,
+                        pOptionalEntropy, pvReserved, pPromptStruct: pointer,
+                        dwFlags: uint32, pDataOut: ptr DataBlob): int32 {.
+                        stdcall, dynlib: "crypt32", importc: "CryptProtectData".}
+  proc cryptUnprotectData(pDataIn: ptr DataBlob, ppszDataDescr: pointer,
+                          pOptionalEntropy, pvReserved, pPromptStruct: pointer,
+                          dwFlags: uint32, pDataOut: ptr DataBlob): int32 {.
+                          stdcall, dynlib: "crypt32", importc: "CryptUnprotectData".}
+
+  proc idiomaWindowsEs(): bool =
+    (getUserDefaultUILanguage() and 0x03FF'u16) == 0x0A'u16
+
+  proc consolaPropia(): bool =
+    var pids: array[2, uint32]
+    getConsoleProcessList(addr pids[0], 2'u32) == 1'u32
+
+  proc escribirConsola(f: File, s: string) =
+    if isatty(f):
+      let h = getStdHandle(if f == stderr: -12'i32 else: -11'i32)
+      let ws = newWideCString(s)
+      let n = uint32(len(ws))
+      var escritos: uint32 = 0
+      if h != 0 and h != -1 and n > 0'u32:
+        if writeConsoleW(h, addr ws[0], n, addr escritos, nil) != 0:
+          return
+    f.write s
+
+  proc escribirLinea(f: File, s: string) =
+    escribirConsola(f, s & "\n")
+
+  proc leerLineaConsola(): string =
+    if isatty(stdin):
+      let h = getStdHandle(-10'i32)
+      if h != 0 and h != -1:
+        var buf: array[4096, Utf16Char]
+        var leidos: uint32 = 0
+        if readConsoleW(h, addr buf[0], uint32(buf.len - 1), addr leidos, nil) != 0:
+          buf[int(leidos)] = Utf16Char(0'u16)
+          result = $(cast[WideCString](addr buf[0]))
+          return result.strip(leading = false, trailing = true, chars = {'\r', '\n'})
+    stdin.readLine()
+
+  proc leerClaveOculta(clave: var string): bool =
+    let h = getStdHandle(-10'i32)
+    var origMode: uint32 = 0
+    var modoCambiado = false
+    if h != 0 and h != -1 and getConsoleMode(h, addr origMode) != 0:
+      let nuevo = (origMode or 0x0003'u32) and not 0x0004'u32
+      modoCambiado = setConsoleMode(h, nuevo) != 0
+    defer:
+      if modoCambiado:
+        discard setConsoleMode(h, origMode)
+      escribirLinea(stdout, "")
+    try:
+      clave = leerLineaConsola()
+      return true
+    except EOFError, IOError:
+      clave = ""
+      return false
+else:
+  proc escribirConsola(f: File, s: string) = f.write s
+  proc escribirLinea(f: File, s: string) = f.writeLine s
+
+let enEs = detectarEspanol(
+  getEnv("LC_ALL"),
+  getEnv("LC_MESSAGES"),
+  getEnv("LANG"),
+  when defined(windows): idiomaWindowsEs() else: false)
 proc tr(es, en: string): string = (if enEs: es else: en)
 proc usoTexto(): string = (if enEs: usoEs else: usoEn)
 
 var anchoEstado = 0
+when defined(windows):
+  var esperarAlSalir = false
 
 proc estado(msg: string) =
   if isatty(stderr) and (msg.len > 0 or anchoEstado > 0):
     let borrar = max(anchoEstado, msg.len)
-    stderr.write "\r" & spaces(borrar) & "\r" & msg
+    escribirConsola(stderr, "\r" & spaces(borrar) & "\r" & msg)
     stderr.flushFile
     anchoEstado = msg.len
 
 proc fallar(msg: string) {.noreturn.} =
   estado("")
-  stderr.writeLine "Error: " & limpiar(msg)
+  escribirLinea(stderr, "Error: " & limpiar(msg))
+  when defined(windows):
+    if esperarAlSalir:
+      escribirLinea(stderr, "")
+      escribirConsola(stderr, tr("Pulsa Enter para salir...", "Press Enter to exit..."))
+      try:
+        discard leerLineaConsola()
+      except EOFError, IOError:
+        discard
   quit 1
 
-proc rutaPortable(): string =
-  getAppDir() / "gemi.cfg"
-
-proc rutaUsuario(): string =
-  getConfigDir() / "gemi-cli" / "config"
-
 proc rutaConfigActiva(): string =
-  let port = rutaPortable()
-  if fileExists(port): port else: rutaUsuario()
+  getConfigDir() / "gemi-cli" / "config"
 
 proc avisarPermisos(ruta: string) =
   when defined(posix):
@@ -81,6 +173,49 @@ proc avisarPermisos(ruta: string) =
       except OSError:
         discard
 
+when defined(windows):
+  const prefijoDpapi = "dpapi:"
+
+  proc cifrarClaveWindows(clave: string): string =
+    if clave.len == 0:
+      return ""
+    var entrada = DataBlob(cbData: uint32(clave.len), pbData: cast[ptr byte](unsafeAddr clave[0]))
+    var salida: DataBlob
+    if cryptProtectData(addr entrada, nil, nil, nil, nil, 0x1'u32, addr salida) == 0:
+      fallar(tr("no se pudo cifrar la clave con DPAPI", "could not encrypt key with DPAPI"))
+    defer:
+      if salida.pbData != nil:
+        discard localFree(salida.pbData)
+    var bytes = newString(int(salida.cbData))
+    if salida.cbData > 0'u32:
+      copyMem(addr bytes[0], salida.pbData, int(salida.cbData))
+    prefijoDpapi & encode(bytes)
+
+  proc descifrarClaveWindows(valor: string): string =
+    if not valor.startsWith(prefijoDpapi):
+      return valor
+    var crudo: string
+    try:
+      crudo = decode(valor[prefijoDpapi.len .. ^1])
+    except ValueError:
+      fallar(tr(
+        "clave cifrada dañada en config; ejecuta 'gemi --set-key'",
+        "corrupted encrypted key in config; run 'gemi --set-key'"))
+    if crudo.len == 0:
+      return ""
+    var entrada = DataBlob(cbData: uint32(crudo.len), pbData: cast[ptr byte](unsafeAddr crudo[0]))
+    var salida: DataBlob
+    if cryptUnprotectData(addr entrada, nil, nil, nil, nil, 0x1'u32, addr salida) == 0:
+      fallar(tr(
+        "no se pudo descifrar GEMINI_API_KEY (¿otro usuario o PC?); ejecuta 'gemi --set-key'",
+        "could not decrypt GEMINI_API_KEY (different user or PC?); run 'gemi --set-key'"))
+    defer:
+      if salida.pbData != nil:
+        discard localFree(salida.pbData)
+    result = newString(int(salida.cbData))
+    if salida.cbData > 0'u32:
+      copyMem(addr result[0], salida.pbData, int(salida.cbData))
+
 proc valor(nombre: string): string =
   result = getEnv(nombre).strip()
   if result.len > 0:
@@ -90,6 +225,9 @@ proc valor(nombre: string): string =
     for linea in lines(ruta):
       result = valorConfig(linea, nombre)
       if result.len > 0:
+        when defined(windows):
+          if nombre == "GEMINI_API_KEY":
+            result = descifrarClaveWindows(result)
         return
   except IOError:
     discard
@@ -128,23 +266,37 @@ proc pedirYGuardarClave(esPrimeraVez: bool): string =
       "set GEMINI_API_KEY or run 'gemi --set-key' in an interactive terminal"))
   let destino = rutaConfigActiva()
   if esPrimeraVez:
-    stderr.writeLine tr("No se encontró GEMINI_API_KEY.", "GEMINI_API_KEY not found.")
-    stderr.writeLine tr(
+    escribirLinea(stderr, tr("No se encontró GEMINI_API_KEY.", "GEMINI_API_KEY not found."))
+    escribirLinea(stderr, tr(
       "Consigue una clave gratuita en: https://aistudio.google.com/apikey",
-      "Get a free key at: https://aistudio.google.com/apikey")
+      "Get a free key at: https://aistudio.google.com/apikey"))
   var entrada = ""
   let promptClave = tr(
     "Pega tu GEMINI_API_KEY (entrada oculta) y pulsa Enter: ",
     "Paste your GEMINI_API_KEY (hidden input) and press Enter: ")
-  if not readPasswordFromStdin(promptClave, entrada):
+  escribirConsola(stdout, promptClave)
+  stdout.flushFile
+  let leida =
+    when defined(windows):
+      leerClaveOculta(entrada)
+    else:
+      readPasswordFromStdin("", entrada)
+  if not leida:
     fallar(tr("entrada cancelada", "input cancelled"))
+  when defined(windows):
+    if '\x16' in entrada:
+      fallar(tr(
+        "en cmd.exe de Windows 7 usa clic derecho -> Pegar (Ctrl+V no pega)",
+        "in Windows 7 cmd.exe use right-click -> Paste (Ctrl+V does not paste)"))
   let limpia = limpiarClave(entrada)
   if not claveValida(limpia):
-    fallar(tr(
-      "formato de clave inválido (debe tener entre 20 y 256 caracteres alfanuméricos, '-' o '_')",
-      "invalid key format (expected 20-256 alphanumeric, '-' or '_' characters)"))
-  guardarConfig(destino, "GEMINI_API_KEY", limpia)
-  stderr.writeLine tr("Clave guardada de forma segura en ", "Key saved securely to ") & destino
+    fallar(tr("formato de clave inválido: ", "invalid key format: ") &
+      diagnosticoClave(limpia, enEs))
+  let aGuardar =
+    when defined(windows): cifrarClaveWindows(limpia)
+    else: limpia
+  guardarConfig(destino, "GEMINI_API_KEY", aGuardar)
+  escribirLinea(stderr, tr("Clave guardada de forma segura en ", "Key saved securely to ") & destino)
   limpia
 
 proc leerStdin(): string =
@@ -191,8 +343,24 @@ proc cargarArchivo(ruta: string, total: var int): string =
       " is binary and its format is not supported (png, jpg, webp, pdf)"))
   parteTexto(tr("Archivo ", "File ") & extractFilename(ruta) & ":\n" & datos)
 
+proc crearContextoSsl(): SslContext =
+  when defined(windows):
+    let ca = getAppDir() / "cacert.pem"
+    if not fileExists(ca):
+      fallar(tr(
+        "no se encontró cacert.pem junto al ejecutable: ",
+        "cacert.pem not found next to executable: ") & ca)
+    try:
+      return newContext(verifyMode = CVerifyPeer, caFile = ca)
+    except CatchableError as e:
+      fallar(tr("no se pudo cargar cacert.pem: ", "could not load cacert.pem: ") & e.msg)
+  else:
+    newContext(verifyMode = CVerifyPeer)
+
 proc enviar(clave, modelo, cuerpo: string): string =
-  let cliente = newHttpClient(timeout = 60_000, maxRedirects = 0)
+  let ctx = crearContextoSsl()
+  defer: destroyContext(ctx)
+  let cliente = newHttpClient(timeout = 60_000, maxRedirects = 0, sslContext = ctx)
   defer: cliente.close()
   cliente.headers = newHttpHeaders({
     "Content-Type": "application/json",
@@ -223,13 +391,60 @@ proc enviar(clave, modelo, cuerpo: string): string =
     if isatty(stderr):
       estado(aviso[0 .. min(aviso.high, 75)])
     else:
-      stderr.writeLine aviso
+      escribirLinea(stderr, aviso)
     sleep(2000 * intento)
 
 proc modeloActivo(flagModelo: string): string =
   if flagModelo.len > 0: return flagModelo
   result = valor("GEMINI_MODEL")
   if result.len == 0: result = modeloPorDefecto
+
+proc mostrarCreditos() =
+  escribirLinea(stdout, "gemi-cli " & versionApp & " - " &
+    tr("Creado por Kenny Waddell", "Created by Kenny Waddell"))
+  escribirLinea(stdout, tr("Repositorio: ", "Repository: ") & "https://github.com/KennyWaddell/gemi-cli")
+  escribirLinea(stdout, tr("Licencia: GNU GPLv3", "License: GNU GPLv3"))
+
+proc mostrarVersionTexto(modeloFlag: string) =
+  escribirLinea(stdout, "gemi-cli " & versionApp & " (" & tr("modelo: ", "model: ") &
+    limpiar(modeloActivo(modeloFlag)) & ")")
+
+proc responderUnaVez(claveApi, modelo: string, busquedaWeb: bool,
+                     datosStdin: string, archivos, palabras: seq[string]) =
+  let cuerpo = block:
+    var partes: seq[string]
+    if datosStdin.len > 0:
+      partes.add parteTexto(tr("Entrada:\n", "Input:\n") & datosStdin)
+    var total = 0
+    for ruta in archivos:
+      partes.add cargarArchivo(ruta, total)
+    if palabras.len > 0:
+      partes.add parteTexto(palabras.join(" "))
+    armarCuerpo(partes, busquedaWeb)
+
+  let respuestaBruta = enviar(claveApi, modelo, cuerpo)
+  let (texto, motivo) = extraerTexto(respuestaBruta, enEs)
+  if texto.len == 0:
+    fallar(tr("respuesta sin texto (", "empty response (") & motivo & ")")
+  let limpio = limpiar(texto)
+  if isatty(stdout):
+    let cols = terminalWidth()
+    let ancho = if cols > 4: cols - 2 else: 80
+    escribirLinea(stdout, ajustarAncho(limpio, ancho))
+  else:
+    escribirLinea(stdout, limpio)
+
+  if busquedaWeb:
+    let fuentes = extraerFuentes(respuestaBruta)
+    if fuentes.len > 0:
+      escribirLinea(stdout, "")
+      escribirLinea(stdout, tr("Fuentes:", "Sources:"))
+      for f in fuentes:
+        escribirLinea(stdout, "- " & f)
+    else:
+      escribirLinea(stderr, tr(
+        "[Aviso] El modelo respondió sin usar búsqueda web.",
+        "[Note] Model answered without web search results."))
 
 proc main() =
   var modelo, nuevoModelo: string
@@ -270,13 +485,10 @@ proc main() =
       of "v", "version":
         mostrarVersion = true
       of "c", "credits":
-        echo "gemi-cli " & versionApp & " - " &
-          tr("Creado por Kenny Waddell", "Created by Kenny Waddell")
-        echo tr("Repositorio: ", "Repository: ") & "https://github.com/KennyWaddell/gemi-cli"
-        echo tr("Licencia: GNU GPLv3", "License: GNU GPLv3")
+        mostrarCreditos()
         quit 0
       of "h", "help":
-        echo usoTexto()
+        escribirLinea(stdout, usoTexto())
         quit 0
       else:
         fallar(tr("opción desconocida: ", "unknown option: ") & clave)
@@ -286,8 +498,7 @@ proc main() =
   avisarPermisos(rutaConfigActiva())
 
   if mostrarVersion:
-    echo "gemi-cli " & versionApp & " (" & tr("modelo: ", "model: ") &
-      limpiar(modeloActivo(modelo)) & ")"
+    mostrarVersionTexto(modelo)
     quit 0
 
   for lit in literales:
@@ -300,8 +511,8 @@ proc main() =
   if nuevoModelo.len > 0:
     let destino = rutaConfigActiva()
     guardarConfig(destino, "GEMINI_MODEL", nuevoModelo)
-    stderr.writeLine tr("Modelo por defecto guardado (", "Default model saved (") &
-      nuevoModelo & tr(") en ", ") to ") & destino
+    escribirLinea(stderr, tr("Modelo por defecto guardado (", "Default model saved (") &
+      nuevoModelo & tr(") en ", ") to ") & destino)
 
   if configurarClave:
     discard pedirYGuardarClave(esPrimeraVez = false)
@@ -311,8 +522,57 @@ proc main() =
     quit 0
 
   if datosStdin.len == 0 and archivos.len == 0 and palabras.len == 0:
-    stderr.writeLine usoTexto()
-    quit 1
+    when defined(windows):
+      if consolaPropia() and isatty(stdin):
+        esperarAlSalir = true
+        escribirLinea(stdout, "gemi-cli " & versionApp & tr(
+          " (escribe --help para ver comandos, exit o Enter vacío para salir)",
+          " (type --help for commands, exit or empty Enter to quit)"))
+        while true:
+          escribirConsola(stdout, tr(
+            "¿Qué le quieres preguntar a Gemini? ",
+            "What would you like to ask Gemini? "))
+          stdout.flushFile
+          var entrada = ""
+          try:
+            entrada = leerLineaConsola().strip()
+          except EOFError, IOError:
+            entrada = ""
+          if entrada.len == 0 or entrada.toLowerAscii() in ["exit", "quit", "salir", "--exit", "--quit"]:
+            quit 0
+          case entrada
+          of "--help", "-h", "--comandos":
+            escribirLinea(stdout, "")
+            escribirLinea(stdout, usoTexto())
+            escribirLinea(stdout, "")
+          of "--version", "-v":
+            mostrarVersionTexto(modelo)
+          of "--credits", "-c":
+            mostrarCreditos()
+          of "--set-key":
+            discard pedirYGuardarClave(esPrimeraVez = false)
+          else:
+            if entrada.startsWith("--set-model "):
+              let m = entrada[12 .. ^1].strip()
+              if not modeloValido(m):
+                escribirLinea(stderr, tr("Error: nombre de modelo no válido", "Error: invalid model name"))
+              else:
+                let destino = rutaConfigActiva()
+                guardarConfig(destino, "GEMINI_MODEL", m)
+                escribirLinea(stderr, tr("Modelo por defecto guardado (", "Default model saved (") &
+                  m & tr(") en ", ") to ") & destino)
+            else:
+              var claveApi = valor("GEMINI_API_KEY")
+              if claveApi.len == 0:
+                claveApi = pedirYGuardarClave(esPrimeraVez = true)
+              let modActual = modeloActivo(modelo)
+              if not modeloValido(modActual):
+                fallar(tr("nombre de modelo no válido", "invalid model name"))
+              responderUnaVez(claveApi, modActual, busquedaWeb, "", @[], @[entrada])
+              escribirLinea(stdout, "")
+    if datosStdin.len == 0 and archivos.len == 0 and palabras.len == 0:
+      escribirLinea(stderr, usoTexto())
+      quit 1
 
   var claveApi = valor("GEMINI_API_KEY")
   if claveApi.len == 0:
@@ -322,39 +582,6 @@ proc main() =
   if not modeloValido(modelo):
     fallar(tr("nombre de modelo no válido", "invalid model name"))
 
-  let cuerpo = block:
-    var partes: seq[string]
-    if datosStdin.len > 0:
-      partes.add parteTexto(tr("Entrada:\n", "Input:\n") & datosStdin)
-    var total = 0
-    for ruta in archivos:
-      partes.add cargarArchivo(ruta, total)
-    if palabras.len > 0:
-      partes.add parteTexto(palabras.join(" "))
-    armarCuerpo(partes, busquedaWeb)
-
-  let respuestaBruta = enviar(claveApi, modelo, cuerpo)
-  let (texto, motivo) = extraerTexto(respuestaBruta, enEs)
-  if texto.len == 0:
-    fallar(tr("respuesta sin texto (", "empty response (") & motivo & ")")
-  let limpio = limpiar(texto)
-  if isatty(stdout):
-    let cols = terminalWidth()
-    let ancho = if cols > 4: cols - 2 else: 80
-    echo ajustarAncho(limpio, ancho)
-  else:
-    echo limpio
-
-  if busquedaWeb:
-    let fuentes = extraerFuentes(respuestaBruta)
-    if fuentes.len > 0:
-      echo ""
-      echo tr("Fuentes:", "Sources:")
-      for f in fuentes:
-        echo "- " & f
-    else:
-      stderr.writeLine tr(
-        "[Aviso] El modelo respondió sin usar búsqueda web.",
-        "[Note] Model answered without web search results.")
+  responderUnaVez(claveApi, modelo, busquedaWeb, datosStdin, archivos, palabras)
 
 main()

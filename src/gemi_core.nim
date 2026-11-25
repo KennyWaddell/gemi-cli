@@ -75,8 +75,23 @@ proc modeloValido*(m: string): bool =
 proc limpiarClave*(k: string): string =
   k.strip(chars = {' ', '\t', '\r', '\n', '"', '\''})
 
+const charsClave = {'a' .. 'z', 'A' .. 'Z', '0' .. '9', '-', '_', '.'}
+
 proc claveValida*(k: string): bool =
-  k.len in 20 .. 256 and k.allCharsInSet({'a' .. 'z', 'A' .. 'Z', '0' .. '9', '-', '_'})
+  k.len in 20 .. 256 and k.allCharsInSet(charsClave)
+
+proc diagnosticoClave*(k: string, enEs = true): string =
+  if k.len == 0:
+    return if enEs: "no se recibió texto (en cmd.exe usa clic derecho -> Pegar)"
+           else: "no input received (in cmd.exe use right-click -> Paste)"
+  if k.len < 20 or k.len > 256:
+    return (if enEs: "longitud inválida: " else: "invalid length: ") &
+      $k.len & (if enEs: " caracteres (se esperan 20-256)" else: " chars (expected 20-256)")
+  for i, c in k:
+    if c notin charsClave:
+      return (if enEs: "carácter no válido en posición " else: "invalid character at position ") &
+        $(i + 1) & " (ASCII " & $ord(c) & ")"
+  ""
 
 proc separarArgs*(params: openArray[string]): tuple[opciones, literales: seq[string]] =
   var trasDobleGuion = false
@@ -114,12 +129,12 @@ proc actualizarConfig*(contenidoActual, campo, valor: string): string =
 proc reintentable*(codigo: int): bool =
   codigo in [429, 500, 503]
 
-proc detectarEspanol*(lcAll, lcMsg, lang: string): bool =
+proc detectarEspanol*(lcAll, lcMsg, lang: string, porDefecto = false): bool =
   for v in [lcAll, lcMsg, lang]:
     let s = v.strip().toLowerAscii()
     if s.len > 0 and s != "c" and s != "posix":
       return s.startsWith("es")
-  false
+  porDefecto
 
 proc limpiar*(s: string): string =
   result = newStringOfCap(s.len)

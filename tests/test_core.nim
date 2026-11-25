@@ -14,9 +14,13 @@ suite "modeloValido y claveValida":
     let k = limpiarClave("  \"CLAVE_FICTICIA_DE_PRUEBA_12345_-ok\"\n")
     check k == "CLAVE_FICTICIA_DE_PRUEBA_12345_-ok"
     check claveValida(k)
+    check claveValida("AQ.Ficticia_1234567890--ok")
     check not claveValida("corta123")
     check not claveValida("clave con espacios 1234567890123")
     check not claveValida("ClaveConSalto\n123456789012345")
+    check "longitud inválida: 5" in diagnosticoClave("corta")
+    check "ASCII 32" in diagnosticoClave("clave con espacios 1234567890123")
+    check diagnosticoClave("") != ""
 
 suite "separarArgs y config":
   test "separa opciones de argumentos literales tras --":
@@ -148,6 +152,9 @@ suite "mensajeError e idioma y fuentes":
     check not detectarEspanol("", "", "fr_FR.UTF-8")
     check not detectarEspanol("", "", "C")
     check not detectarEspanol("", "", "")
+    check detectarEspanol("", "", "", porDefecto = true)
+    check not detectarEspanol("", "", "en_US.UTF-8", porDefecto = true)
+    check detectarEspanol("", "", "C", porDefecto = true)
   test "extraerFuentes lee URLs válidas de groundingMetadata":
     let resp = """{"candidates":[{"groundingMetadata":{"groundingChunks":[
       {"web":{"uri":"https://kernel.org/","title":"Kernel"}},

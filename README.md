@@ -4,9 +4,9 @@
   <b>English</b> • <b><a href="README.es.md">Leer en Español</a></b>
 </p>
 
-> **Ultralight Native Terminal Client for the Gemini API (Linux)**  
+> **Ultralight Native Terminal Client for the Gemini API (Linux & Windows)**  
 > Compiled to native machine code in Nim with zero external package dependencies. Built specifically for low-spec hardware (Intel Celeron, Atom, vintage laptops, and 2 GB RAM PCs).
-> *Linux support is available in `v1.0.0`. The portable Windows build (7 SP1, 8.1, 10 LTSB/LTSC) is currently in development and pending real-hardware testing.*
+> *Available for Linux and Windows (7 SP1, 8.1, 10 LTSB/LTSC, and 11).*
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Platform: Linux & Windows](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-blue.svg)](#installation-on-linux)
@@ -14,6 +14,9 @@
 
 <p align="center">
   <img src="assets/gemi-linux.png" alt="Gemi-CLI running on antiX Linux" width="750">
+</p>
+<p align="center">
+  <img src="assets/gemi-win7.png" alt="Gemi-CLI running natively on Windows 7 SP1 (800 MB RAM)" width="750">
 </p>
 
 ---
@@ -39,8 +42,8 @@ Opening the Gemini web app in a modern browser consumes **600 MB to 900 MB of RA
 
 ## Key Features
 
-- **Secure first-run setup:** if no [Google AI Studio](https://aistudio.google.com/apikey) key is found, `gemi` prompts for it with hidden terminal input (keeping it out of `~/.bash_history`) and saves it automatically with `0600` permissions.
-- **USB-ready portable mode:** placing a `gemi.cfg` file next to the binary overrides `~/.config/gemi-cli/config` (Linux) or `%APPDATA%\gemi-cli\config` (Windows).
+- **Secure first-run setup:** if no [Google AI Studio](https://aistudio.google.com/apikey) key is found, `gemi` prompts for it with hidden terminal input (keeping it out of shell history) and saves it to `~/.config/gemi-cli/config` with `0600` permissions on Linux, or encrypted with **Windows DPAPI** (`CryptProtectData`) in `%APPDATA%\gemi-cli\config` on Windows.
+- **Native Windows 7+ support:** UTF-16 console I/O (`WriteConsoleW` / `ReadConsoleW`), automatic OS language detection, bundled `cacert.pem` + OpenSSL 1.1.1k, and a friendly interactive prompt when double-clicked from Explorer.
 - **Verified multimodal attachments (`-f`):** attach one or multiple text/code files (up to 1 MB) or `PNG`, `JPG`, `WEBP`, and `PDF` files (up to 8 MB each, validated against real binary magic headers rather than file extensions alone).
 - **Smart terminal word-wrapping:** wraps paragraphs to your terminal width without splitting words mid-line, aligns bullet lists, and preserves code blocks (` ``` `) and file redirections (`>`) untouched.
 - **Optional real-time web search (`-w` / `--web`):** enables Google Search Grounding on demand for up-to-date answers and prints source URLs at the end (or notifies if no search was triggered), keeping it off by default to preserve low latency and daily quota.
@@ -69,6 +72,20 @@ To uninstall:
 ```bash
 ./uninstall.sh
 ```
+
+---
+
+## Installation on Windows (Portable)
+
+Tested natively on **Windows 7 SP1** (without compatibility wrappers) and compatible with **Windows 8.1, 10 (LTSB/LTSC), and 11**.
+
+1. Download `gemi-cli-v1.0.0-win64.zip` from [GitHub Releases](https://github.com/KennyWaddell/gemi-cli/releases) and verify its checksum against `SHA256.txt`.
+2. Extract the `Gemi-CLI Windows` folder (keep `gemi.exe`, `cacert.pem`, `libcrypto-1_1-x64.dll`, and `libssl-1_1-x64.dll` together).
+3. **Double-click `gemi.exe`** to ask questions directly (supports `--help`, `--set-key`, `--set-model`, and `exit`/`quit` to close), **or** open `cmd.exe` / PowerShell:
+   ```cmd
+   systeminfo | gemi "Analyze this hardware and rate my PC"
+   ```
+   *(Optional: run `install.bat` to add the folder to your User `PATH` without admin privileges so `gemi` works from any terminal.)*
 
 ---
 
@@ -111,8 +128,8 @@ To set a custom default model permanently, run `gemi --set-model model_name`. Yo
 | `-w`, `--web` | Enables live Google Search Grounding for up-to-date web information. |
 | `-m`, `--model <id>` | Overrides the model for that query (e.g., `gemini-3.8-flash`). Defaults to `gemini-3.5-flash-lite` for the lowest latency and highest daily free-tier quota in AI Studio. |
 | `-f`, `--file <path>` | Attaches a text/code file (max 1 MB) or binary (`PNG`, `JPG`, `WEBP`, `PDF`, max 8 MB). Can be passed multiple times (16 MB total cap). |
-| `--set-key` | Prompts for and stores your `GEMINI_API_KEY` with hidden input and `0600` permissions. |
-| `--set-model <id>` | Permanently updates your default model inside `config` / `gemi.cfg`. |
+| `--set-key` | Prompts for and stores your `GEMINI_API_KEY` with hidden input (`0600` on Linux, DPAPI on Windows). |
+| `--set-model <id>` | Permanently updates your default model inside `config`. |
 | `-v`, `--version` | Prints the installed version along with the currently active model. |
 | `-c`, `--credits` | Displays author credits, license, and repository URL. |
 | `-h`, `--help` | Displays usage summary and configuration lookup priority. |

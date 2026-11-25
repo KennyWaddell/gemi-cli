@@ -4,9 +4,9 @@
   <b><a href="README.md">English Version</a></b> • <b>Español</b>
 </p>
 
-> **Cliente de Terminal Ultraligero para la API de Gemini (Linux)**  
+> **Cliente de Terminal Ultraligero para la API de Gemini (Linux y Windows)**  
 > Compilado de forma nativa en Nim sin dependencias externas de paquetes. Pensado para equipos de bajos recursos (Intel Celeron, Atom, laptops antiguas y PCs con 2 GB de RAM).
-> *Soporte para Linux disponible en `v1.0.0`. La versión portable para Windows (7 SP1, 8.1, 10 LTSB/LTSC) está en desarrollo y pendiente de pruebas reales.*
+> *Disponible para Linux y Windows (7 SP1, 8.1, 10 LTSB/LTSC y 11).*
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Platform: Linux & Windows](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-blue.svg)](#requisitos)
@@ -14,6 +14,9 @@
 
 <p align="center">
   <img src="assets/gemi-linux.png" alt="Gemi-CLI en antiX Linux" width="750">
+</p>
+<p align="center">
+  <img src="assets/gemi-win7.png" alt="Gemi-CLI funcionando de forma nativa en Windows 7 SP1 (800 MB RAM)" width="750">
 </p>
 
 ---
@@ -39,8 +42,8 @@ Abrir la interfaz web de Gemini en un navegador moderno consume entre **600 MB y
 
 ## Características Principales
 
-- **Configuración segura en el primer uso (*First-run setup*):** si aún no tienes configurada tu clave de [Google AI Studio](https://aistudio.google.com/apikey), `gemi` te la solicita con entrada oculta en consola (sin dejar rastro en `~/.bash_history`) y la guarda automáticamente con permisos `0600`.
-- **Modo portable listo para USB:** si colocas un archivo `gemi.cfg` junto al binario, tiene prioridad sobre `~/.config/gemi-cli/config` (Linux) o `%APPDATA%\gemi-cli\config` (Windows).
+- **Configuración segura en el primer uso (*First-run setup*):** si aún no tienes configurada tu clave de [Google AI Studio](https://aistudio.google.com/apikey), `gemi` te la solicita con entrada oculta en consola (sin dejar rastro en el historial) y la guarda en `~/.config/gemi-cli/config` con permisos `0600` en Linux, o cifrada con **Windows DPAPI** (`CryptProtectData`) en `%APPDATA%\gemi-cli\config` en Windows.
+- **Soporte nativo en Windows 7+:** entrada/salida de consola en UTF-16 (`WriteConsoleW` / `ReadConsoleW`), detección automática del idioma del sistema, `cacert.pem` + OpenSSL 1.1.1k incluidos y prompt interactivo al abrir con doble clic desde el Explorador.
 - **Adjuntos multimodales verificados (`-f`):** adjunta uno o varios archivos de código, texto plano (máx. 1 MB), imágenes (`PNG`, `JPG`, `WEBP`) o documentos `PDF` (máx. 8 MB por archivo, validando la cabecera binaria real y no solo la extensión).
 - **Formato limpio en terminal:** ajusta automáticamente el texto al ancho de tu ventana sin cortar palabras por la mitad, alinea listas y respeta intactos los bloques de código y las redirecciones a archivos (`>`).
 - **Búsqueda web en tiempo real opcional (`-w` / `--web`):** conecta la consulta a Google Search Grounding cuando necesitas datos actuales e imprime las fuentes/URLs al final (o avisa si respondió sin búsqueda), manteniéndolo apagado por defecto para cuidar tu velocidad y tu cuota diaria.
@@ -69,6 +72,20 @@ Para desinstalar:
 ```bash
 ./uninstall.sh
 ```
+
+---
+
+## Instalación en Windows (Portable)
+
+Probado de forma nativa en **Windows 7 SP1** (sin capas de compatibilidad) y compatible con **Windows 8.1, 10 (LTSB/LTSC) y 11**.
+
+1. Descarga `gemi-cli-v1.0.0-win64.zip` desde [GitHub Releases](https://github.com/KennyWaddell/gemi-cli/releases) y verifica su suma con `SHA256.txt`.
+2. Descomprime la carpeta `Gemi-CLI Windows` (mantén juntos `gemi.exe`, `cacert.pem`, `libcrypto-1_1-x64.dll` y `libssl-1_1-x64.dll`).
+3. **Haz doble clic en `gemi.exe`** para preguntar directamente (acepta `--help`, `--set-key`, `--set-model` y `exit`/`salir` para cerrar), **o** abre `cmd.exe` / PowerShell:
+   ```cmd
+   systeminfo | gemi "Analiza este hardware y dime qué tal es mi PC"
+   ```
+   *(Opcional: ejecuta `install.bat` para añadir la carpeta al `PATH` de tu usuario sin permisos de administrador y poder usar `gemi` desde cualquier terminal.)*
 
 ---
 
@@ -111,8 +128,8 @@ Para fijar un modelo distinto de forma permanente sin escribir `-m` cada vez, ej
 | `-w`, `--web` | Activa búsqueda en vivo con Google Search Grounding para datos actuales. |
 | `-m`, `--model <id>` | Usa un modelo específico en esa consulta (ej. `gemini-3.8-flash`). Por defecto usa `gemini-3.5-flash-lite` por ofrecer la menor latencia y la cuota gratuita diaria más alta en AI Studio. |
 | `-f`, `--file <ruta>` | Adjunta un archivo de texto/código (máx. 1 MB) o binario (`PNG`, `JPG`, `WEBP`, `PDF`, máx. 8 MB). Se puede repetir varias veces (tope total: 16 MB). |
-| `--set-key` | Solicita y guarda tu `GEMINI_API_KEY` con entrada oculta y permisos `0600`. |
-| `--set-model <id>` | Cambia y guarda de forma permanente tu modelo por defecto en `config` / `gemi.cfg`. |
+| `--set-key` | Solicita y guarda tu `GEMINI_API_KEY` con entrada oculta (`0600` en Linux, DPAPI en Windows). |
+| `--set-model <id>` | Cambia y guarda de forma permanente tu modelo por defecto en `config`. |
 | `-v`, `--version` | Muestra la versión instalada y el modelo activo actual. |
 | `-c`, `--credits` | Muestra los créditos de autoría, licencia y URL del repositorio. |
 | `-h`, `--help` | Muestra la ayuda rápida y el orden de prioridad de configuración. |
