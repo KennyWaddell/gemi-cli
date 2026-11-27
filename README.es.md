@@ -122,6 +122,24 @@ gemi --set-key
 
 Para fijar un modelo distinto de forma permanente sin escribir `-m` cada vez, ejecuta `gemi --set-model nombre_del_modelo`. Puedes verificar qué modelo está activo en cualquier momento con `gemi -v`.
 
+### Recetas Prácticas (Tuberías y Comandos)
+
+¿Por qué usar `gemi` con tuberías (`|`) en vez del navegador? Porque envías la salida de cualquier comando al instante sin copiar y pegar:
+
+```bash
+# 1. Windows: analizar tu PC y guardar un informe limpio en .txt (CRLF)
+systeminfo | gemi -o informe-pc.txt "Analiza este hardware y dime qué tal es"
+
+# 2. Linux: revisar cambios sin commitear con un rol estricto
+git diff | gemi -s "Lista solo bugs reales o riesgos, máximo 5 puntos" "Revisa"
+
+# 3. Transcribir una nota de voz o resumir un PDF pesado (>8 MB vía File API)
+gemi -f nota_voz.ogg "Transcribe y resume los puntos clave"
+
+# 4. Abrir un chat en memoria y guardarlo al terminar con /save
+gemi -i -s "Explica paso a paso con respuestas cortas"
+```
+
 ---
 
 ## Opciones de Línea de Comandos

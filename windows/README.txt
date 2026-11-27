@@ -45,6 +45,23 @@ Commands & Options
   /save [file_or_path] (e.g. /save notes.txt or /save C:\...\notes.txt,
   with or without quotes), --set-key, --set-model, --version, --credits, or exit.
 
+Practical Recipes (Pipes & Flags)
+  1. Analyze your PC and save a clean .txt report (CRLF):
+     systeminfo | gemi -o pc-report.txt "Rate this hardware"
+  2. Diagnose network or running processes via pipe:
+     ipconfig /all | gemi "Check if my DNS and network look normal"
+     tasklist | gemi "Which processes are using the most resources?"
+  3. List files in a folder and ask Gemini to organize or explain them:
+     dir /b | gemi "Group these files by type"
+  4. Compare two screenshots or analyze an error image:
+     gemi -f img1.png -f img2.png "What changed between these two?"
+  5. Search the web in real time with -w:
+     gemi -w "Latest stable Windows 10 LTSC build number"
+  6. Summarize a heavy PDF (>8 MB) or audio/video via File API:
+     gemi -f voice_note.ogg "Transcribe and summarize"
+  7. Start an in-memory chat with a fixed rule and export with /save:
+     gemi -i -s "Short, step-by-step answers"
+
 Credits & License
   Created by Kenny Waddell
   Repository: https://github.com/KennyWaddell/gemi-cli
@@ -92,6 +109,23 @@ Comandos y opciones
   Nota: Al abrir gemi.exe con doble clic también puedes escribir -i, --help,
   --models, /save [archivo_o_ruta] (ej. /save notas.txt o /save C:\...\notas.txt,
   con o sin comillas), --set-key, --set-model, --version, --credits o exit.
+
+Recetas prácticas (Tuberías y comandos)
+  1. Analizar tu PC y guardar un informe limpio en .txt (CRLF):
+     systeminfo | gemi -o informe-pc.txt "Analiza este hardware"
+  2. Diagnosticar red o procesos activos por tubería:
+     ipconfig /all | gemi "¿Ves algún problema en mi red o DNS?"
+     tasklist | gemi "¿Qué procesos destacan o consumen más?"
+  3. Listar archivos de una carpeta para organizarlos o resumirlos:
+     dir /b | gemi "Agrupa estos archivos por tipo"
+  4. Comparar dos capturas o analizar un error en imagen:
+     gemi -f cap1.png -f cap2.png "¿Qué cambió entre ambas?"
+  5. Buscar en Internet en tiempo real con -w:
+     gemi -w "¿Cuál es la última versión estable de Windows 10 LTSC?"
+  6. Resumir un PDF pesado (>8 MB) o transcribir audio/vídeo (File API):
+     gemi -f nota_voz.ogg "Transcribe y resume"
+  7. Iniciar un chat en memoria con regla fija y exportarlo con /save:
+     gemi -i -s "Respuestas cortas paso a paso"
 
 Créditos y licencia
   Creado por Kenny Waddell

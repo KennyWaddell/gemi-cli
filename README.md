@@ -122,6 +122,24 @@ gemi --set-key
 
 To set a custom default model permanently, run `gemi --set-model model_name`. You can check which model is currently active at any time by running `gemi -v`.
 
+### Practical Recipes (Pipes & Flags)
+
+Why use `gemi` with pipes (`|`) instead of a browser? You can send system outputs directly without copy-pasting:
+
+```bash
+# 1. Windows: inspect hardware and save a clean .txt report (CRLF)
+systeminfo | gemi -o pc-report.txt "Rate this hardware and suggest upgrades"
+
+# 2. Linux: review uncommitted code changes with a strict system role
+git diff | gemi -s "List only real bugs or security risks, max 5 bullets" "Review"
+
+# 3. Transcribe a voice note or summarize a heavy PDF (>8 MB via File API)
+gemi -f voice_note.ogg "Transcribe and summarize action items"
+
+# 4. Start an in-memory study/debug chat and export it at the end with /save
+gemi -i -s "Explain step by step, short answers"
+```
+
 ---
 
 ## Command-Line Options

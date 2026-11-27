@@ -630,6 +630,8 @@ proc mostrarRespuesta(respuestaBruta: string, busquedaWeb: bool): string =
   if isatty(stdout):
     let cols = terminalWidth()
     let ancho = if cols > 8: cols - 4 else: 74
+    when not defined(windows):
+      escribirLinea(stdout, "")
     escribirLinea(stdout, ajustarAncho(formatearTerminal(limpio), ancho))
   else:
     escribirLinea(stdout, limpio)
@@ -689,7 +691,6 @@ proc ejecutarChat(claveApi, modeloInicial, sistema, rutaSalida: string,
     let cuerpo = armarCuerpoChat(turnos, busquedaWeb, sistema)
     let (resp, usado) = enviar(claveApi, modeloActual, cuerpo)
     modeloActual = usado
-    escribirLinea(stdout, "")
     let texto = mostrarRespuesta(resp, busquedaWeb)
     turnos.add ("model", @[parteTexto(texto)])
     if textoInicial.len > 0:
@@ -722,7 +723,6 @@ proc ejecutarChat(claveApi, modeloInicial, sistema, rutaSalida: string,
     let cuerpo = armarCuerpoChat(turnos, busquedaWeb, sistema)
     let (resp, usado) = enviar(claveApi, modeloActual, cuerpo)
     modeloActual = usado
-    escribirLinea(stdout, "")
     let texto = mostrarRespuesta(resp, busquedaWeb)
     turnos.add ("model", @[parteTexto(texto)])
     historial.add "## " & tr("Tú", "You") & "\n" & entrada & "\n\n## Gemini\n" & limpiar(texto) & "\n"
@@ -924,7 +924,6 @@ proc main() =
               let modActual = modeloActivo(modelo)
               if not modeloValido(modActual):
                 fallar(tr("nombre de modelo no válido", "invalid model name"))
-              escribirLinea(stdout, "")
               let respTxt = responderUnaVez(claveApi, modActual, sistema, "", "", busquedaWeb, "", @[], @[entrada])
               if respTxt.len > 0:
                 historialWin.add "## " & tr("Tú", "You") & "\n" & entrada & "\n\n## Gemini\n" & limpiar(respTxt) & "\n"
